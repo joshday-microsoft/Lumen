@@ -144,10 +144,11 @@ def frame(f):
 
 if __name__ == "__main__":
     frames = [frame(f) for f in range(FRAMES)]
-    # shared 48-color palette, no dither — keeps the file inside the panel's buffer
+    # shared 48-color palette, no dither, full frames (no optimize: delta/transparency
+    # frames are risky on the panel's firmware decoder)
     pal = frames[0].quantize(colors=48)
     q = [fr.quantize(palette=pal, dither=Image.Dither.NONE) for fr in frames]
-    q[0].save(HERE / "beacon.gif", save_all=True, append_images=q[1:], duration=150, loop=0, optimize=True)
+    q[0].save(HERE / "beacon.gif", save_all=True, append_images=q[1:], duration=150, loop=0)
     keys = (0, 6, 15, 16)   # up, seaward, whale reveal, boat reveal
     strip = Image.new("RGB", (SIZE * 6 * len(keys) + (len(keys) - 1) * 4, SIZE * 6), (20, 20, 24))
     for i, k in enumerate(keys):

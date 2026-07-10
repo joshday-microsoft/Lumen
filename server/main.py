@@ -25,6 +25,8 @@ from idotmatrix import (
     Text as IdmText,
 )
 
+from idotmatrix.const import UUID_READ_DATA, UUID_WRITE_DATA
+
 from .canvas import Canvas, CanvasError, parse_color
 
 log = logging.getLogger("lumen")
@@ -301,23 +303,78 @@ async def image(body: dict = Body(...)):
     return {"pushed": pushed}
 
 
+async def send_gif_flow_controlled(gif_bytes: bytes):
+    """Send a GIF with per-block flow control. The device acks each 4k block
+    with a notification (05 00 01 00 01 ...); the library fires blocks
+    blind, which drops everything past the first block on this panel and
+    truncates animations. Caller must hold dev_lock."""
+    chunks = IdmGif()._createPayloads(bytearray(gif_bytes))
+    client = cm.client
+    ack = asyncio.Event()
+
+    def on_notify(_char, payload: bytearray):
+        log.info("gif ack notification: %s", bytes(payload[:8]).hex())
+        ack.set()
+
+    notify_ok = True
+    try:
+        await client.start_notify(UUID_READ_DATA, on_notify)
+    except Exception as e:
+        notify_ok = False
+        log.warning("start_notify failed (%s) — falling back to fixed delays", e)
+    try:
+        char = client.services.get_characteristic(UUID_WRITE_DATA)
+        mtu = char.max_write_without_response_size
+        for ci, chunk in enumerate(chunks):
+            ack.clear()
+            for i in range(0, len(chunk), mtu):
+                await client.write_gatt_char(UUID_WRITE_DATA, chunk[i:i + mtu], response=True)
+            if notify_ok:
+                try:
+                    await asyncio.wait_for(ack.wait(), timeout=2.5)
+                except asyncio.TimeoutError:
+                    log.warning("no ack for gif block %d/%d — pausing instead", ci + 1, len(chunks))
+                    await asyncio.sleep(0.5)
+            else:
+                await asyncio.sleep(0.5)
+        log.info("gif upload done: %d bytes in %d blocks", len(gif_bytes), len(chunks))
+    finally:
+        if notify_ok:
+            try:
+                await client.stop_notify(UUID_READ_DATA)
+            except Exception:
+                pass
+
+
 @app.post("/gif")
 async def gif(body: dict = Body(...)):
     path = body.get("path")
     if not path or not Path(path).exists():
         raise HTTPException(400, f"gif path not found: {path}")
 
-    # already panel-native GIFs go up verbatim — the library's re-encode
-    # (uploadProcessed) bloats files past the device's animation buffer
+    # panel-native GIFs go up verbatim; anything else gets resized first.
+    # (the library's uploadProcessed re-encode also bloats files — avoid it)
     from PIL import Image as PilImage
+    import io as _io
     with PilImage.open(path) as im:
-        native = im.size == (canvas.size, canvas.size)
+        if im.size == (canvas.size, canvas.size):
+            gif_bytes = Path(path).read_bytes()
+        else:
+            frames, durations = [], []
+            try:
+                while True:
+                    durations.append(im.info.get("duration", 120))
+                    frames.append(im.copy().convert("RGB").resize((canvas.size, canvas.size), PilImage.NEAREST))
+                    im.seek(im.tell() + 1)
+            except EOFError:
+                pass
+            buf = _io.BytesIO()
+            frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:],
+                           duration=durations, loop=0)
+            gif_bytes = buf.getvalue()
 
     async def _send():
-        if native:
-            await IdmGif().uploadUnprocessed(str(path))
-        else:
-            await IdmGif().uploadProcessed(str(path), pixel_size=canvas.size)
+        await send_gif_flow_controlled(gif_bytes)
 
     await device_call(_send, mode="gif")
     state["needs_push"] = True
