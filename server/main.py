@@ -44,6 +44,11 @@ logging.getLogger().addHandler(_fh)
 
 DEFAULT_SCROLL_FONT = r"C:\Windows\Fonts\arialbd.ttf"
 
+# panel firmware limits, learned the hard way: >16 frames freezes the decoder
+# (requires power-cycle); >1 protocol block risks the same. Enforced on /gif.
+MAX_GIF_FRAMES = 16
+MAX_GIF_BYTES = 4080
+
 
 def load_config() -> dict:
     if CONFIG_PATH.exists():
@@ -372,6 +377,13 @@ async def gif(body: dict = Body(...)):
             frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:],
                            duration=durations, loop=0)
             gif_bytes = buf.getvalue()
+
+    with PilImage.open(_io.BytesIO(gif_bytes)) as chk:
+        nframes = getattr(chk, "n_frames", 1)
+    if nframes > MAX_GIF_FRAMES:
+        raise HTTPException(400, f"GIF has {nframes} frames — the panel's decoder freezes above {MAX_GIF_FRAMES} (needs a power-cycle to recover). Re-cut to <= {MAX_GIF_FRAMES} frames.")
+    if len(gif_bytes) > MAX_GIF_BYTES:
+        raise HTTPException(400, f"GIF is {len(gif_bytes)} bytes — must fit one protocol block (<= {MAX_GIF_BYTES}). Fewer frames / smaller palette.")
 
     async def _send():
         await send_gif_flow_controlled(gif_bytes)

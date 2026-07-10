@@ -34,7 +34,8 @@ No MCP at all? The daemon is plain HTTP — same verbs as endpoints (`POST /draw
 - `text` op = built-in 3×5 font, 4px per char ⇒ **max ~8 chars per line** at scale 1; `align:"center"`, `scale`, `\n` supported. Longer message? Use `lumen_notify` instead.
 - Clock/text/GIF modes take over the panel; the canvas is retained — any `lumen_draw` or `POST /push` restores it.
 - **Check your work**: `lumen_canvas` returns the canvas as an image.
-- Rich art: generate a PNG/GIF with Pillow (see `art\generate.py` for the pattern; venv at `.venv\Scripts\python.exe`), then `lumen_image` / `lumen_gif`. GIF rules (hard-won): **whole file ≤ 4080 bytes — one protocol block**. Bigger GIFs freeze the panel's decoder (it unpacks all frames to RAM); recover with a power-cycle. Recipe that fits: ~12–16 frames, shared quantized palette ≤32 colors, no dither, full frames, never `optimize=True`. Print the byte size after saving and shrink frames/colors until it fits (see `art\beacon.py`).
+- Rich art: generate a PNG/GIF with Pillow (see `art\generate.py` for the pattern; venv at `.venv\Scripts\python.exe`), then `lumen_image` / `lumen_gif`. GIF rules (hard-won, daemon-enforced): **≤ 16 frames AND ≤ 4080 bytes** (one protocol block). Above ~16 frames the panel's decoder freezes mid-animation and only a **power-cycle** recovers it — and BLE keeps acking while frozen, so uploads "succeed" with nothing showing. Recipe: 10–16 frames, shared quantized palette ≤48 colors, no dither, never `optimize=True`. Print byte size after saving; shrink until it fits (see `art\beacon.py`).
+- Design law: at 32×32, **big subject, minimal scene** — one large character/element beats a tiny sprite in a detailed level.
 
 ## Troubleshooting
 
