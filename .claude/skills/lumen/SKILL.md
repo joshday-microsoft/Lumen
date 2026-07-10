@@ -34,7 +34,7 @@ No MCP at all? The daemon is plain HTTP — same verbs as endpoints (`POST /draw
 - `text` op = built-in 3×5 font, 4px per char ⇒ **max ~8 chars per line** at scale 1; `align:"center"`, `scale`, `\n` supported. Longer message? Use `lumen_notify` instead.
 - Clock/text/GIF modes take over the panel; the canvas is retained — any `lumen_draw` or `POST /push` restores it.
 - **Check your work**: `lumen_canvas` returns the canvas as an image.
-- Rich art: generate a PNG/GIF with Pillow (see `art\generate.py` for the pattern; venv at `.venv\Scripts\python.exe`), then `lumen_image` / `lumen_gif`. GIF rules: save **full frames** (never `optimize=True` — the firmware chokes on delta/transparency frames), shared palette ≤64 colors, ~16–36 frames, keep under ~30 KB. The daemon flow-controls the upload (device acks each 4 KB block), so size = upload time, not truncation.
+- Rich art: generate a PNG/GIF with Pillow (see `art\generate.py` for the pattern; venv at `.venv\Scripts\python.exe`), then `lumen_image` / `lumen_gif`. GIF rules (hard-won): **whole file ≤ 4080 bytes — one protocol block**. Bigger GIFs freeze the panel's decoder (it unpacks all frames to RAM); recover with a power-cycle. Recipe that fits: ~12–16 frames, shared quantized palette ≤32 colors, no dither, full frames, never `optimize=True`. Print the byte size after saving and shrink frames/colors until it fits (see `art\beacon.py`).
 
 ## Troubleshooting
 
