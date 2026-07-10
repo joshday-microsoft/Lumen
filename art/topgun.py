@@ -121,22 +121,22 @@ def draw_text(img, text, y, color, shadow=None):
 
 
 def build_frames():
+    # 15-frame budget (panel decoder limit + one 4k block): taxi 4 + burner 3 + launch 4 + title 4
     frames = []
     jy = DECK_Y - len(JET)  # gear on the deck
-    taxi = [-13, -10, -7, -5, -3, -1, 1, 3, 5, CAT_X]        # f0..9
-    for f, jx in enumerate(taxi):
+    for jx in (-13, -7, -1, CAT_X):                           # f0..3 taxi
         img = base_scene()
         draw_jet(img, jx, jy)
         frames.append(img)
 
-    for f in range(6):                                        # f10..15 burner spool
+    for f, length in enumerate((2, 4, 5)):                    # f5..7 burner spool
         img = base_scene()
-        draw_flame(img, CAT_X, jy, length=min(5, f + 1), hot=(f % 2 == 0))
+        draw_flame(img, CAT_X, jy, length=length, hot=(f % 2 == 0))
         draw_jet(img, CAT_X, jy)
         frames.append(img)
 
-    run_x = [8, 11, 15, 20, 26, 33, 41]                       # f16..22 launch + climb
-    run_dy = [0, 0, -1, -1, -2, -3, -5]
+    run_x = [9, 15, 24, 36]                                   # f8..11 launch + climb
+    run_dy = [0, -1, -3, -5]
     for i in range(len(run_x)):
         img = base_scene()
         draw_steam(img, 0, i)
@@ -144,9 +144,9 @@ def build_frames():
         draw_jet(img, run_x[i], jy + run_dy[i])
         frames.append(img)
 
-    for i in range(8):                                        # f23..30 title card
+    for i in range(4):                                        # f12..15 title card
         img = base_scene()
-        draw_steam(img, 0, 5 + i)
+        draw_steam(img, 0, 4 + i)
         if i >= 1:
             draw_text(img, "TOP", 6, GOLD, SHADOW)
             draw_text(img, "GUN", 13, GOLD, SHADOW)
@@ -156,10 +156,11 @@ def build_frames():
 
 if __name__ == "__main__":
     frames = build_frames()
-    frames[0].save(HERE / "topgun.gif", save_all=True, append_images=frames[1:], duration=120, loop=0)
-    keys = (7, 13, 19, 26)
+    import gifsafe
+    size = gifsafe.save(frames, HERE / "topgun.gif", duration_ms=160, colors=32)
+    print(f"topgun.gif: {len(frames)} frames, {size} bytes")
+    keys = (2, 5, 8, 13)
     strip = Image.new("RGB", (SIZE * 6 * len(keys) + (len(keys) - 1) * 4, SIZE * 6), (20, 20, 24))
     for i, k in enumerate(keys):
         strip.paste(frames[k].resize((SIZE * 6, SIZE * 6), Image.NEAREST), (i * (SIZE * 6 + 4), 0))
     strip.save(HERE / "topgun.strip.png")
-    print("wrote topgun.gif,", len(frames), "frames")

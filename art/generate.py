@@ -82,7 +82,7 @@ def make_sunset() -> Image.Image:
 
 # ---------------------------------------------------------------- starfield gif
 
-def make_starfield(frames=24) -> list[Image.Image]:
+def make_starfield(frames=16) -> list[Image.Image]:
     rng = random.Random(42)
     stars = []
     while len(stars) < 26:
@@ -139,12 +139,8 @@ if __name__ == "__main__":
     save_with_preview(sunset, "sunset.png")
 
     frames = make_starfield()
-    frames[0].save(
-        HERE / "starfield.gif",
-        save_all=True,
-        append_images=frames[1:],
-        duration=110,
-        loop=0,
-    )
+    import gifsafe
+    size = gifsafe.save(frames, HERE / "starfield.gif", duration_ms=140, colors=32)
+    print(f"starfield.gif: {len(frames)} frames, {size} bytes")
     frames[0].resize((SIZE * 8, SIZE * 8), Image.NEAREST).save(HERE / "starfield.gif.preview.png")
     print("wrote", HERE / "sunset.png", "and", HERE / "starfield.gif")

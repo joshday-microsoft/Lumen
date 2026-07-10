@@ -104,7 +104,9 @@ def frame(f):
 
 if __name__ == "__main__":
     frames = [frame(f) for f in range(FRAMES)]
-    frames[0].save(HERE / "surfer.gif", save_all=True, append_images=frames[1:], duration=120, loop=0)
+    import gifsafe
+    size = gifsafe.save(frames, HERE / "surfer.gif", duration_ms=120, colors=24)
+    print(f"surfer.gif: {len(frames)} frames, {size} bytes")
     keys = (0, 4, 8, 12)
     strip = Image.new("RGB", (SIZE * 6 * len(keys) + (len(keys) - 1) * 4, SIZE * 6), (20, 20, 24))
     for i, k in enumerate(keys):

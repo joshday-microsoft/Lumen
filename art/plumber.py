@@ -138,80 +138,69 @@ def dim(img, k):
 
 
 def build():
+    # 16-frame budget (panel decoder limit) — same story, tighter cuts
     frames = []
 
     def emit(img, k=1.0):
         frames.append(dim(img, k) if k < 1.0 else img)
 
     # f0 fade-in, empty, block fresh
-    emit_scene = scene()
-    draw_pipes(emit_scene)
-    emit(emit_scene.copy(), 0.45)
+    img = scene()
+    draw_pipes(img)
+    emit(img, 0.45)
 
-    # f1-2 emerge from left pipe
-    for feet in (26, 20):
-        img = scene()
-        draw_hero(img, 1, feet)
-        draw_pipes(img)
-        emit(img)
+    # f1 emerge onto the left pipe
+    img = scene(); draw_hero(img, 1, 20); draw_pipes(img); emit(img)
 
-    # f3-5 walk right
-    for i, x in enumerate((7, 9, 11)):
+    # f2-3 walk right
+    for i, x in enumerate((7, 10)):
         img = scene()
         draw_hero(img, x, 27, pose=(i % 2))
         draw_pipes(img)
         emit(img)
 
-    # f6 jump, f7 hit (bump + coin), f8 fall (used, coin sparkles away)
+    # f4 jump, f5 hit (bump + coin), f6 fall (used, coin sparkles away)
     img = scene(); draw_hero(img, 13, 24); draw_pipes(img); emit(img)
     img = scene(bump=1, coin=0); draw_hero(img, 13, 23); draw_pipes(img); emit(img)
     img = scene(used=True, coin=3, sparkle=True); draw_hero(img, 13, 26); draw_pipes(img); emit(img)
 
-    # f9-10 mushroom emerges on the block
-    img = scene(used=True); draw_hero(img, 13, 27)
-    rect(img, 14, 12, 16, 12, MUSH_R); draw_pipes(img); emit(img)
+    # f7 mushroom on the block
     img = scene(used=True); draw_hero(img, 13, 27)
     draw_mushroom(img, 13, 9); draw_pipes(img); emit(img)
 
-    # f11-12 mushroom drops right, hero walks to it
+    # f8 mushroom drops, f9 they meet
     img = scene(used=True); draw_hero(img, 13, 27, pose=1)
     draw_mushroom(img, 20, 24); draw_pipes(img); emit(img)
     img = scene(used=True); draw_hero(img, 15, 27)
     draw_mushroom(img, 18, 24); draw_pipes(img); emit(img)
 
-    # f13 flash + f14 grown
+    # f10 flash + f11 grown
     img = scene(used=True); draw_hero(img, 15, 27, big=True, flash=True); draw_pipes(img); emit(img)
     img = scene(used=True); draw_hero(img, 15, 27, big=True); draw_pipes(img); emit(img)
 
-    # f15-16 big walk right
-    for i, x in enumerate((18, 21)):
-        img = scene(used=True)
-        draw_hero(img, x, 27, big=True, pose=((i + 1) % 2))
-        draw_pipes(img)
-        emit(img)
+    # f12 big walk right
+    img = scene(used=True); draw_hero(img, 20, 27, big=True, pose=1); draw_pipes(img); emit(img)
 
-    # f17-19 onto the right pipe and down
-    for feet in (20, 24, 28):
+    # f13-14 onto the right pipe and down
+    for feet in (20, 24):
         img = scene(used=True)
         draw_hero(img, 25, feet, big=True)
         draw_pipes(img)
         emit(img)
 
-    # f20 empty, f21-23 fade to black (the reset happens in the dark)
-    img = scene(used=True); draw_pipes(img); emit(img)
-    for k in (0.55, 0.25, 0.0):
-        img = scene(used=True); draw_pipes(img)
-        emit(img, k if k > 0 else 0.001)
+    # f15 fade toward black (the reset happens in the dark)
+    img = scene(used=True); draw_pipes(img)
+    emit(img, 0.2)
 
     return frames
 
 
 if __name__ == "__main__":
     frames = build()
-    frames[0].save(HERE / "plumber.gif", save_all=True, append_images=frames[1:], duration=170, loop=0)
-    size = (HERE / "plumber.gif").stat().st_size
+    import gifsafe
+    size = gifsafe.save(frames, HERE / "plumber.gif", duration_ms=200, colors=32)
     print(f"plumber.gif: {len(frames)} frames, {size} bytes ({'OK, single block' if size <= 4080 else 'TOO BIG!'})")
-    keys = (2, 7, 14, 18)   # emerge, coin hit, grown, pipe descent
+    keys = (1, 5, 11, 13)   # emerge, coin hit, grown, pipe descent
     strip = Image.new("RGB", (SIZE * 6 * len(keys) + (len(keys) - 1) * 4, SIZE * 6), (20, 20, 24))
     for i, k in enumerate(keys):
         strip.paste(frames[k].resize((SIZE * 6, SIZE * 6), Image.NEAREST), (i * (SIZE * 6 + 4), 0))

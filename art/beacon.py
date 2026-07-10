@@ -15,7 +15,7 @@ from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 SIZE = 32
-FRAMES = 16          # single-4k-block budget: the panel's decoder freezes on big multi-block GIFs
+FRAMES = 14          # full-frame (no-delta) encode must fit one 4k block
 HORIZON = 20
 
 LAMP = (25.5, 7.5)
@@ -144,14 +144,10 @@ def frame(f):
 
 if __name__ == "__main__":
     frames = [frame(f) for f in range(FRAMES)]
-    # shared 32-color palette, no dither, full frames, no optimize — and the whole
-    # file must stay under one 4096-byte protocol block (panel decoder limit)
-    pal = frames[0].quantize(colors=32)
-    q = [fr.quantize(palette=pal, dither=Image.Dither.NONE) for fr in frames]
-    q[0].save(HERE / "beacon.gif", save_all=True, append_images=q[1:], duration=220, loop=0)
-    size = (HERE / "beacon.gif").stat().st_size
-    print(f"beacon.gif: {size} bytes ({'OK, single block' if size <= 4080 else 'TOO BIG — exceeds one 4k block!'})")
-    keys = (0, 4, 10, 11)   # up, seaward, whale reveal, boat reveal
+    import gifsafe
+    size = gifsafe.save(frames, HERE / "beacon.gif", duration_ms=250, colors=24)
+    print(f"beacon.gif: {len(frames)} frames, {size} bytes ({'OK, single block' if size <= 4080 else 'TOO BIG!'})")
+    keys = (0, 4, 9, 10)   # up, seaward, whale reveal, boat reveal
     strip = Image.new("RGB", (SIZE * 6 * len(keys) + (len(keys) - 1) * 4, SIZE * 6), (20, 20, 24))
     for i, k in enumerate(keys):
         strip.paste(frames[k].resize((SIZE * 6, SIZE * 6), Image.NEAREST), (i * (SIZE * 6 + 4), 0))

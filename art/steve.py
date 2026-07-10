@@ -105,7 +105,9 @@ if __name__ == "__main__":
         steve(img, f, blink=(f == 6))
         frames.append(img)
 
-    frames[0].save(HERE / "steve.gif", save_all=True, append_images=frames[1:], duration=140, loop=0)
+    import gifsafe
+    size = gifsafe.save(frames, HERE / "steve.gif", duration_ms=140, colors=32)
+    print(f"steve.gif: {len(frames)} frames, {size} bytes")
     frames[0].resize((SIZE * 8, SIZE * 8), Image.NEAREST).save(HERE / "steve.gif.preview.png")
 
     # 4-frame strip (down, up, tilt right, blink+tilt left) for review
