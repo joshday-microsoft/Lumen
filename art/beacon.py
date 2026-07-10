@@ -15,7 +15,7 @@ from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 SIZE = 32
-FRAMES = 36
+FRAMES = 24
 HORIZON = 20
 
 LAMP = (25.5, 7.5)
@@ -90,19 +90,19 @@ def frame(f):
             i = beam_intensity(x, y, theta)
             img.putpixel((x, y), lerp(base, LIGHT, i * 0.85) if i > 0 else base)
 
-    # stars (twinkle), clear of the tower
+    # stars (static — inter-frame noise bloats the GIF past the panel's buffer)
     for _ in range(18):
         x, y = rng.randrange(SIZE), rng.randrange(HORIZON - 3)
         if x > 20:
             continue
-        b = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(2 * math.pi * (f / FRAMES) * 2 + rng.uniform(0, 6.28)))
+        b = rng.uniform(0.45, 1.0)
         i = beam_intensity(x, y, theta)
         c = lerp((0, 0, 0), (172, 180, 220), b)
         img.putpixel((x, y), lerp(c, LIGHT, i * 0.85) if i > 0 else c)
 
-    # sea glints drifting
+    # sea glints (static, same reason)
     for k in range(10):
-        x = (k * 7 + f) % SIZE
+        x = (k * 7 + 3) % SIZE
         y = HORIZON + 2 + (k * 3) % (SIZE - HORIZON - 3)
         if (x - 4) ** 2 < 1 and y in (17, 18, 19):
             continue
@@ -144,8 +144,11 @@ def frame(f):
 
 if __name__ == "__main__":
     frames = [frame(f) for f in range(FRAMES)]
-    frames[0].save(HERE / "beacon.gif", save_all=True, append_images=frames[1:], duration=110, loop=0)
-    keys = (0, 9, 22, 24)   # up, seaward, whale reveal, boat reveal
+    # shared 48-color palette, no dither — keeps the file inside the panel's buffer
+    pal = frames[0].quantize(colors=48)
+    q = [fr.quantize(palette=pal, dither=Image.Dither.NONE) for fr in frames]
+    q[0].save(HERE / "beacon.gif", save_all=True, append_images=q[1:], duration=150, loop=0, optimize=True)
+    keys = (0, 6, 15, 16)   # up, seaward, whale reveal, boat reveal
     strip = Image.new("RGB", (SIZE * 6 * len(keys) + (len(keys) - 1) * 4, SIZE * 6), (20, 20, 24))
     for i, k in enumerate(keys):
         strip.paste(frames[k].resize((SIZE * 6, SIZE * 6), Image.NEAREST), (i * (SIZE * 6 + 4), 0))

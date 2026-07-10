@@ -307,8 +307,17 @@ async def gif(body: dict = Body(...)):
     if not path or not Path(path).exists():
         raise HTTPException(400, f"gif path not found: {path}")
 
+    # already panel-native GIFs go up verbatim — the library's re-encode
+    # (uploadProcessed) bloats files past the device's animation buffer
+    from PIL import Image as PilImage
+    with PilImage.open(path) as im:
+        native = im.size == (canvas.size, canvas.size)
+
     async def _send():
-        await IdmGif().uploadProcessed(str(path), pixel_size=canvas.size)
+        if native:
+            await IdmGif().uploadUnprocessed(str(path))
+        else:
+            await IdmGif().uploadProcessed(str(path), pixel_size=canvas.size)
 
     await device_call(_send, mode="gif")
     state["needs_push"] = True
