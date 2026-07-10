@@ -84,10 +84,12 @@ def frame(f):
 
 
 if __name__ == "__main__":
+    import gifsafe
+
     frames = [frame(f) for f in range(FRAMES)]
-    frames[0].save(HERE / "microsoft.gif", save_all=True, append_images=frames[1:], duration=140, loop=0)
-    size = (HERE / "microsoft.gif").stat().st_size
-    print(f"microsoft.gif: {len(frames)} frames, {size} bytes ({'OK, single block' if size <= 4080 else 'TOO BIG!'})")
+    size = gifsafe.save(frames, HERE / "microsoft.gif", duration_ms=140, colors=32)
+    print(f"microsoft.gif: {len(frames)} frames, {size} bytes, panel-safe encode, round-trip OK"
+          f" ({'single block' if size <= 4080 else 'TOO BIG!'})")
     keys = (2, 5, 8, 13)   # flying in, assembled, gleam, scattering
     strip = Image.new("RGB", (SIZE * 6 * len(keys) + (len(keys) - 1) * 4, SIZE * 6), (20, 20, 24))
     for i, k in enumerate(keys):
