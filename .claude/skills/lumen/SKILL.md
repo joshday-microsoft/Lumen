@@ -34,7 +34,7 @@ No MCP at all? The daemon is plain HTTP — same verbs as endpoints (`POST /draw
 - `text` op = built-in 3×5 font, 4px per char ⇒ **max ~8 chars per line** at scale 1; `align:"center"`, `scale`, `\n` supported. Longer message? Use `lumen_notify` instead.
 - Clock/text/GIF modes take over the panel; the canvas is retained — any `lumen_draw` or `POST /push` restores it.
 - **Check your work**: `lumen_canvas` returns the canvas as an image.
-- Rich art: generate a PNG/GIF with Pillow (see `art\generate.py` for the pattern; venv at `.venv\Scripts\python.exe`), then `lumen_image` / `lumen_gif`. Short GIF loops only — BLE is slow (~24 frames is fine).
+- Rich art: generate a PNG/GIF with Pillow (see `art\generate.py` for the pattern; venv at `.venv\Scripts\python.exe`), then `lumen_image` / `lumen_gif`. GIF rules: save **full frames** (never `optimize=True` — the firmware chokes on delta/transparency frames), shared palette ≤64 colors, ~16–36 frames, keep under ~30 KB. The daemon flow-controls the upload (device acks each 4 KB block), so size = upload time, not truncation.
 
 ## Troubleshooting
 
