@@ -35,6 +35,11 @@ CONFIG_PATH = ROOT / "config.json"
 TMP = ROOT / "tmp"
 TMP.mkdir(exist_ok=True)
 
+# headless runs (scheduled task / pythonw) have no console — keep a file log too
+_fh = logging.FileHandler(TMP / "lumen.log", encoding="utf-8")
+_fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+logging.getLogger().addHandler(_fh)
+
 DEFAULT_SCROLL_FONT = r"C:\Windows\Fonts\arialbd.ttf"
 
 
