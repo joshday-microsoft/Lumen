@@ -15,3 +15,4 @@ different — new subject, new mood, and rotate the medium (loop / painting / st
 | 2026-07-10 | microsoft | loop | four brand panes assemble, gleam, scatter; boot-spinner dots |
 | 2026-07-10 | spectrum-spiral | painting | 1,024 LEDs, one/sec, full spectrum coiled inward (17 min) |
 | 2026-07-10 | happy-tree | painting | live landscape: sky wash, snow mountain, meadow, dabbed tree |
+| 2026-07-10 | for-cory | painting | dedication to Cory: heart fills bottom-up, gold CORY signature, sparkles |
