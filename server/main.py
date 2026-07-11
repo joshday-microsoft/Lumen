@@ -30,6 +30,7 @@ from idotmatrix import (
 from idotmatrix.const import UUID_READ_DATA, UUID_WRITE_DATA
 
 from .canvas import Canvas, CanvasError, parse_color
+from .snake import BG, BODY, FOOD, HEAD, SnakeGame
 
 log = logging.getLogger("lumen")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -632,6 +633,111 @@ async def life(body: dict = Body(default={})):
 async def life_stop():
     spiral_state["running"] = False
     return {"stopped": True, "generation": spiral_state["index"]}
+
+
+SNAKE_COLORS = {
+    HEAD: (230, 255, 235),
+    BODY: (40, 210, 90),
+    FOOD: (255, 45, 45),
+    BG: (2, 3, 8),
+}
+
+
+async def _graffiti_px(x: int, y: int, rgb, label="snake") -> bool:
+    """Set one pixel via Graffiti, resilient to BLE drops; mirror to canvas.
+    Returns False if the show was stopped while waiting."""
+    while spiral_state["running"]:
+        if is_connected():
+            try:
+                async with dev_lock:
+                    await IdmGraffiti().setPixel(rgb[0], rgb[1], rgb[2], x, y)
+                canvas.img.putpixel((x, y), rgb)
+                return True
+            except Exception as e:
+                state["last_error"] = f"{type(e).__name__}: {e}"
+                log.warning("%s pixel %d,%d failed (%s), awaiting reconnect", label, x, y, e)
+                try:
+                    await cm.disconnect()
+                except Exception:
+                    pass
+                cm.client = None
+        await asyncio.sleep(1.5)
+    return False
+
+
+async def _snake_clear_and_paint(game):
+    """Full black frame, then paint the current snake + food via Graffiti."""
+    canvas.apply_ops([{"op": "clear", "color": "#020308"}])
+    if is_connected():
+        try:
+            async with dev_lock:
+                await push_canvas_locked()
+        except Exception:
+            pass
+    state["display_mode"] = "snake"
+    for (x, y, role) in game.full_cells():
+        if not spiral_state["running"]:
+            return
+        await _graffiti_px(x, y, SNAKE_COLORS[role])
+
+
+async def snake_runner(delay: float):
+    """Self-playing Snake on the wall. Torus board, so the only death is a
+    self-collision — on which it flashes red and resets. See server/snake.py."""
+    import time as _t
+
+    n = canvas.size
+    game = SnakeGame(n, __import__("random").Random(int(_t.time())))
+    spiral_state.update(running=True, total=0, delay=delay, index=0)
+    state["display_mode"] = "snake"
+    log.info("snake: starting, %.3fs/step on %dx%d", delay, n, n)
+    try:
+        await _snake_clear_and_paint(game)
+        await asyncio.sleep(delay)
+        while spiral_state["running"]:
+            changes = game.step()
+            spiral_state["index"] = game.score
+            if game.dead:
+                log.info("snake: self-collision at length %d, score %d — resetting",
+                         len(game.snake), game.score)
+                # flash the whole snake red (one full-frame push, not per-pixel)
+                for (x, y) in game.body_cells():
+                    canvas.img.putpixel((x, y), (255, 60, 40))
+                if is_connected():
+                    try:
+                        async with dev_lock:
+                            await push_canvas_locked()
+                    except Exception:
+                        pass
+                    state["display_mode"] = "snake"
+                await asyncio.sleep(0.8)
+                game.reset()
+                await _snake_clear_and_paint(game)
+                await asyncio.sleep(delay)
+                continue
+            for (x, y, role) in changes:
+                if not spiral_state["running"]:
+                    break
+                await _graffiti_px(x, y, SNAKE_COLORS[role])
+            await asyncio.sleep(delay)
+        log.info("snake: stopped at score %d", spiral_state["index"])
+    finally:
+        spiral_state["running"] = False
+
+
+@app.post("/snake")
+async def snake(body: dict = Body(default={})):
+    if _painter_busy():
+        raise HTTPException(409, "a show is already running — stop it first")
+    delay = max(0.03, float(body.get("delay", 0.09)))
+    spiral_state["task"] = asyncio.create_task(snake_runner(delay))
+    return {"started": True, "delay": delay}
+
+
+@app.post("/snake/stop")
+async def snake_stop():
+    spiral_state["running"] = False
+    return {"stopped": True, "score": spiral_state["index"]}
 
 
 @app.post("/spiral")

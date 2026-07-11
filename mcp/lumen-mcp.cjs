@@ -158,6 +158,14 @@ const TOOLS = [
     },
   },
   {
+    name: "lumen_snake",
+    description: "Play a self-running Snake scene on the wall: an AI snake hunts food and grows, and when it traps itself it flashes red and resets. Runs until stopped (lumen_paint_stop) or another scene starts. delay = seconds per move (default 0.09).",
+    inputSchema: {
+      type: "object",
+      properties: { delay: { type: "number", description: "seconds per move (default 0.09; lower = faster)" } },
+    },
+  },
+  {
     name: "lumen_config",
     description: "Get/set panel config. Set size (16/32/64) if rendering looks wrong, or clear the saved BLE address to re-scan.",
     inputSchema: {
@@ -230,6 +238,8 @@ async function callTool(name, args) {
       return json(await api("POST", "/paint/stop"));
     case "lumen_spiral":
       return json(await api("POST", "/spiral", { delay: args.delay }));
+    case "lumen_snake":
+      return json(await api("POST", "/snake", { delay: args.delay }));
     case "lumen_config":
       if (args.size === undefined && args.address === undefined) return json(await api("GET", "/status"));
       return json(await api("PUT", "/config", args));
