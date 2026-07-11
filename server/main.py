@@ -642,42 +642,33 @@ SNAKE_FOOD = (255, 45, 45)
 SNAKE_BG = (2, 3, 8)
 
 
-def _render_snake(game):
-    """Paint the whole board from game state — authoritative each frame, so no
-    stray 'dropping' pixels survive and BLE glitches self-heal next frame."""
-    img = canvas.img
-    n = canvas.size
-    for y in range(n):
-        for x in range(n):
-            img.putpixel((x, y), SNAKE_BG)
+def _snake_frame(game) -> dict:
+    """The lit cells for the current game state: {(x, y): (r, g, b)}."""
+    cur: dict = {}
     if game.food is not None:
-        img.putpixel(game.food, SNAKE_FOOD)
-    for i, (x, y) in enumerate(game.snake):
-        img.putpixel((x, y), SNAKE_HEAD if i == 0 else SNAKE_BODY)
+        cur[game.food] = SNAKE_FOOD
+    for i, cell in enumerate(game.snake):
+        cur[cell] = SNAKE_HEAD if i == 0 else SNAKE_BODY
+    return cur
 
 
-async def _snake_push() -> bool:
-    """Push the current canvas; drop the link on failure so it can recover."""
-    if not is_connected():
-        return False
-    try:
-        async with dev_lock:
-            await push_canvas_locked()
-        state["display_mode"] = "snake"
-        return True
-    except Exception as e:
-        state["last_error"] = f"{type(e).__name__}: {e}"
+async def _push_clear(color="#020308"):
+    """One authoritative black frame (a single image push). Used only at start
+    and on the rare hard-reset — never per step — so it doesn't cause flashing."""
+    canvas.apply_ops([{"op": "clear", "color": color}])
+    if is_connected():
         try:
-            await cm.disconnect()
+            async with dev_lock:
+                await push_canvas_locked()
         except Exception:
             pass
-        cm.client = None
-        return False
 
 
 async def snake_runner(delay: float):
-    """Self-playing Snake on the wall (classic rules — walls and self are lethal).
-    On any crash it hard-resets to a fresh game. See server/snake.py."""
+    """Self-playing Snake (classic rules — walls and self are lethal). Renders by
+    diffing frames and pushing only the ~3 changed pixels per move via Graffiti, so
+    the panel is never full-refreshed mid-game (no flashing). A single black push
+    handles the hard-reset blink on a crash."""
     import time as _t
 
     n = canvas.size
@@ -685,29 +676,39 @@ async def snake_runner(delay: float):
     spiral_state.update(running=True, total=0, delay=delay, index=0)
     state["display_mode"] = "snake"
     log.info("snake: starting, %.3fs/step on %dx%d", delay, n, n)
+
+    await _push_clear()             # clean start (single push, not per-step)
+    state["display_mode"] = "snake"
+    prev: dict = {}
     try:
-        _render_snake(game)
-        while spiral_state["running"] and not await _snake_push():
-            await asyncio.sleep(1.5)
-        await asyncio.sleep(delay)
         while spiral_state["running"]:
-            game.step()
+            cur = _snake_frame(game)
             spiral_state["index"] = game.score
+            for cell in list(prev):
+                if cell not in cur:
+                    if not spiral_state["running"]:
+                        break
+                    await _graffiti_set(cell[0], cell[1], SNAKE_BG)
+            for cell, color in cur.items():
+                if prev.get(cell) != color:
+                    if not spiral_state["running"]:
+                        break
+                    await _graffiti_set(cell[0], cell[1], color)
+            prev = cur
+
+            game.step()
             if game.dead:
                 log.info("snake: crash at length %d, score %d — hard reset",
                          len(game.snake), game.score)
-                canvas.apply_ops([{"op": "clear", "color": "#020308"}])  # blink to black
-                await _snake_push()
                 await asyncio.sleep(0.15)
+                await _push_clear()      # instant hard-reset blink (one push)
+                state["display_mode"] = "snake"
                 game.reset()
-                _render_snake(game)
-                await _snake_push()
-                await asyncio.sleep(delay)
+                prev = {}
+                await asyncio.sleep(0.1)
                 continue
-            _render_snake(game)
-            while spiral_state["running"] and not await _snake_push():
-                await asyncio.sleep(1.5)
-            await asyncio.sleep(delay)
+            if delay:
+                await asyncio.sleep(delay)
         log.info("snake: stopped at score %d", spiral_state["index"])
     finally:
         spiral_state["running"] = False
