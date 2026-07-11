@@ -132,6 +132,32 @@ const TOOLS = [
     },
   },
   {
+    name: "lumen_paint",
+    description: "PAINT on the wall live, stroke by stroke (Graffiti mode — no GIF). Pass an ordered list of [x,y,color] pixels; they appear one at a time, so the ORDER is the performance: wash backgrounds first, then subjects, details last. ~20 strokes/sec at delay 0.02. The canvas mirrors every stroke.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pixels: { type: "array", description: "ordered strokes: [[x, y, '#rrggbb'], ...]" },
+        delay: { type: "number", description: "seconds between strokes (default 0.02)" },
+        clear: { type: "boolean", description: "start from black (default true)" },
+      },
+      required: ["pixels"],
+    },
+  },
+  {
+    name: "lumen_paint_stop",
+    description: "Stop a live painting or spiral in progress.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "lumen_spiral",
+    description: "Live spectrum spiral: fills all 1024 LEDs one at a time (outside-in, full rainbow). delay=1.0 takes ~17 min; 0.05 is a fast rainbow wipe.",
+    inputSchema: {
+      type: "object",
+      properties: { delay: { type: "number", description: "seconds per LED (default 1.0)" } },
+    },
+  },
+  {
     name: "lumen_config",
     description: "Get/set panel config. Set size (16/32/64) if rendering looks wrong, or clear the saved BLE address to re-scan.",
     inputSchema: {
@@ -198,6 +224,12 @@ async function callTool(name, args) {
       return json(await api("POST", "/brightness", { percent: args.percent }));
     case "lumen_screen":
       return json(await api("POST", "/screen", { on: args.on }));
+    case "lumen_paint":
+      return json(await api("POST", "/paint", { pixels: args.pixels, delay: args.delay, clear: args.clear }));
+    case "lumen_paint_stop":
+      return json(await api("POST", "/paint/stop"));
+    case "lumen_spiral":
+      return json(await api("POST", "/spiral", { delay: args.delay }));
     case "lumen_config":
       if (args.size === undefined && args.address === undefined) return json(await api("GET", "/status"));
       return json(await api("PUT", "/config", args));

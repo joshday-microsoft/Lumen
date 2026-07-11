@@ -482,26 +482,24 @@ def spiral_coords(n: int):
     return coords
 
 
-async def spiral_runner(delay: float):
-    """Paint one LED per `delay` seconds via Graffiti mode, spiraling inward,
-    hue sweeping the full spectrum. Survives BLE drops (resumes same pixel)."""
-    coords = spiral_coords(canvas.size)
-    total = len(coords)
-    spiral_state.update(running=True, total=total, delay=delay)
-    log.info("spiral start: %d pixels, %.2fs each (~%.1f min)", total, delay, total * delay / 60)
+async def paint_runner(steps, delay: float, clear: bool, label: str):
+    """Live-paint pixels via Graffiti mode, in order, mirrored on the canvas.
+    Survives BLE drops (waits and resumes on the same pixel)."""
+    total = len(steps)
+    spiral_state.update(running=True, total=total, delay=delay, index=0)
+    log.info("%s: painting %d pixels, %.3fs delay (~%.1f min)", label, total, delay, total * max(delay, 0.03) / 60)
     try:
-        canvas.apply_ops([{"op": "clear"}])   # clean slate on panel + mirror
-        if is_connected():
-            try:
-                async with dev_lock:
-                    await push_canvas_locked()
-            except Exception:
-                pass
+        if clear:
+            canvas.apply_ops([{"op": "clear"}])   # clean slate on panel + mirror
+            if is_connected():
+                try:
+                    async with dev_lock:
+                        await push_canvas_locked()
+                except Exception:
+                    pass
         state["display_mode"] = "graffiti"
-        for i in range(spiral_state["index"], total):
+        for i, (x, y, (r, g, b)) in enumerate(steps):
             spiral_state["index"] = i
-            x, y = coords[i]
-            r, g, b = (round(c * 255) for c in colorsys.hsv_to_rgb(i / (total - 1), 1.0, 1.0))
             while spiral_state["running"]:
                 if is_connected():
                     try:
@@ -510,7 +508,7 @@ async def spiral_runner(delay: float):
                         break
                     except Exception as e:
                         state["last_error"] = f"{type(e).__name__}: {e}"
-                        log.warning("spiral pixel %d failed (%s), waiting for reconnect", i, e)
+                        log.warning("%s pixel %d failed (%s), waiting for reconnect", label, i, e)
                         try:
                             await cm.disconnect()
                         except Exception:
@@ -518,31 +516,69 @@ async def spiral_runner(delay: float):
                         cm.client = None
                 await asyncio.sleep(2)
             if not spiral_state["running"]:
-                log.info("spiral stopped at pixel %d", i)
+                log.info("%s stopped at pixel %d", label, i)
                 return
             canvas.img.putpixel((x, y), (r, g, b))
             if i % 64 == 0:
-                log.info("spiral progress: %d/%d", i, total)
-            await asyncio.sleep(delay)
-        log.info("spiral complete: %d pixels", total)
+                log.info("%s progress: %d/%d", label, i, total)
+            if delay:
+                await asyncio.sleep(delay)
+        log.info("%s complete: %d pixels", label, total)
     finally:
         spiral_state["running"] = False
 
 
+def _painter_busy():
+    task = spiral_state.get("task")
+    return task and not task.done()
+
+
 @app.post("/spiral")
 async def spiral(body: dict = Body(default={})):
-    task = spiral_state.get("task")
-    if task and not task.done():
-        raise HTTPException(409, "spiral already running — POST /spiral/stop first")
+    if _painter_busy():
+        raise HTTPException(409, "a painting is already in progress — POST /paint/stop first")
     delay = max(0.05, float(body.get("delay", 1.0)))
-    spiral_state["index"] = max(0, int(body.get("start", 0)))
-    spiral_state["task"] = asyncio.create_task(spiral_runner(delay))
-    total = canvas.size * canvas.size
-    return {"started": True, "delay": delay, "total": total, "eta_min": round(total * delay / 60, 1)}
+    start = max(0, int(body.get("start", 0)))
+    coords = spiral_coords(canvas.size)
+    n = len(coords)
+    steps = [
+        (x, y, tuple(round(c * 255) for c in colorsys.hsv_to_rgb(i / (n - 1), 1.0, 1.0)))
+        for i, (x, y) in enumerate(coords)
+    ][start:]
+    spiral_state["task"] = asyncio.create_task(paint_runner(steps, delay, clear=(start == 0), label="spiral"))
+    return {"started": True, "delay": delay, "total": len(steps), "eta_min": round(len(steps) * delay / 60, 1)}
 
 
+@app.post("/paint")
+async def paint(body: dict = Body(...)):
+    """Live-paint an ordered pixel sequence: {pixels: [[x, y, color], ...],
+    delay?: seconds between strokes, clear?: start from black (default true)}.
+    The stroke ORDER is the performance."""
+    if _painter_busy():
+        raise HTTPException(409, "a painting is already in progress — POST /paint/stop first")
+    raw = body.get("pixels")
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(400, "pixels must be a non-empty list of [x, y, color]")
+    steps = []
+    try:
+        for p in raw:
+            x, y, c = int(p[0]), int(p[1]), parse_color(p[2])
+            if not (0 <= x < canvas.size and 0 <= y < canvas.size):
+                raise ValueError(f"pixel out of bounds: {x},{y}")
+            steps.append((x, y, c))
+    except (ValueError, TypeError, IndexError, CanvasError) as e:
+        raise HTTPException(400, f"bad pixel entry: {e}")
+    delay = max(0.0, float(body.get("delay", 0.02)))
+    spiral_state["task"] = asyncio.create_task(
+        paint_runner(steps, delay, clear=bool(body.get("clear", True)), label="paint")
+    )
+    return {"started": True, "pixels": len(steps), "delay": delay,
+            "eta_s": round(len(steps) * max(delay, 0.03), 1)}
+
+
+@app.post("/paint/stop")
 @app.post("/spiral/stop")
-async def spiral_stop():
+async def paint_stop():
     spiral_state["running"] = False
     return {"stopped": True, "at": spiral_state["index"]}
 
