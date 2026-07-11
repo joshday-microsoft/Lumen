@@ -533,6 +533,107 @@ def _painter_busy():
     return task and not task.done()
 
 
+AGE_COLORS = [
+    (140, 255, 205),   # newborn
+    (80, 220, 170),
+    (50, 170, 175),
+    (45, 120, 185),
+    (65, 75, 180),
+    (95, 45, 150),     # elder
+]
+
+
+async def life_runner(delay: float, density: float):
+    """Conway's Game of Life, streamed to the panel as it evolves.
+    Torus wrap, cells colored by age, self-reseeding on stagnation."""
+    import time as _t
+
+    n = canvas.size
+    rng = __import__("random").Random(int(_t.time()))
+
+    def fresh_soup():
+        return {(x, y) for y in range(n) for x in range(n) if rng.random() < density}
+
+    def step(cells):
+        counts = {}
+        for (x, y) in cells:
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if dx or dy:
+                        k = ((x + dx) % n, (y + dy) % n)
+                        counts[k] = counts.get(k, 0) + 1
+        return {k for k, c in counts.items() if c == 3 or (c == 2 and k in cells)}
+
+    cells = fresh_soup()
+    ages = {c: 0 for c in cells}
+    history, stagnant, gen = [], 0, 0
+    spiral_state.update(running=True, total=0, delay=delay, index=0)
+    log.info("life: starting, density %.2f, %.2fs/gen", density, delay)
+    state["display_mode"] = "life"
+    try:
+        while spiral_state["running"]:
+            # render generation onto the canvas
+            img = canvas.img
+            for y in range(n):
+                for x in range(n):
+                    if (x, y) in cells:
+                        img.putpixel((x, y), AGE_COLORS[min(ages[(x, y)], len(AGE_COLORS) - 1)])
+                    else:
+                        img.putpixel((x, y), (3, 4, 8))
+            if is_connected():
+                try:
+                    async with dev_lock:
+                        await push_canvas_locked()
+                    state["display_mode"] = "life"
+                except Exception as e:
+                    state["last_error"] = f"{type(e).__name__}: {e}"
+                    try:
+                        await cm.disconnect()
+                    except Exception:
+                        pass
+                    cm.client = None
+            spiral_state["index"] = gen
+
+            # evolve
+            new_cells = step(cells)
+            ages = {c: (ages.get(c, -1) + 1) for c in new_cells}
+            cells = new_cells
+            gen += 1
+
+            # stagnation / extinction -> reseed
+            h = hash(frozenset(cells))
+            if not cells or h in history:
+                stagnant += 1
+            else:
+                stagnant = 0
+            history = (history + [h])[-8:]
+            if not cells or stagnant > 10:
+                log.info("life: reseeding at generation %d", gen)
+                cells = fresh_soup()
+                ages = {c: 0 for c in cells}
+                history, stagnant = [], 0
+            await asyncio.sleep(delay)
+        log.info("life: stopped at generation %d", gen)
+    finally:
+        spiral_state["running"] = False
+
+
+@app.post("/life")
+async def life(body: dict = Body(default={})):
+    if _painter_busy():
+        raise HTTPException(409, "a show is already running — POST /life/stop first")
+    delay = max(0.3, float(body.get("delay", 0.5)))
+    density = min(0.6, max(0.05, float(body.get("density", 0.28))))
+    spiral_state["task"] = asyncio.create_task(life_runner(delay, density))
+    return {"started": True, "delay": delay, "density": density}
+
+
+@app.post("/life/stop")
+async def life_stop():
+    spiral_state["running"] = False
+    return {"stopped": True, "generation": spiral_state["index"]}
+
+
 @app.post("/spiral")
 async def spiral(body: dict = Body(default={})):
     if _painter_busy():
