@@ -46,13 +46,13 @@ logging.getLogger().addHandler(_fh)
 
 DEFAULT_SCROLL_FONT = r"C:\Windows\Fonts\arialbd.ttf"
 
-# panel firmware limits, measured 2026-07-10 with instrumented frame-counter
-# probes (art/frametest.py): 23 frames loops clean, 24 freezes the decoder
-# until power-cycle. Byte limit = one protocol block (multi-block untested
-# with the safe encoder). Enforced on /gif; body {"force":true} bypasses
-# for boundary testing only.
-MAX_GIF_FRAMES = 23
-MAX_GIF_BYTES = 4080
+# panel limits per instrumented probes (art/frametest.py, 2026-07-10):
+# with gifsafe encoding there is NO frame cliff at 24 — the old freezes were
+# Pillow delta frames. Proven playback envelope: 60 frames / 8.1KB / 2 blocks
+# (5-block transport also acked; playback beyond 60f unverified). Guards sit
+# at the proven envelope; body {"force":true} bypasses for boundary testing.
+MAX_GIF_FRAMES = 60
+MAX_GIF_BYTES = 8192
 
 
 def load_config() -> dict:
