@@ -17,3 +17,4 @@ different — new subject, new mood, and rotate the medium (loop / painting / st
 | 2026-07-10 | happy-tree | painting | live landscape: sky wash, snow mountain, meadow, dabbed tree |
 | 2026-07-10 | for-cory | painting | dedication to Cory: heart fills bottom-up, gold CORY signature, sparkles |
 | 2026-07-10 | tempest | loop | night storm: rain, forked lightning flash reveals hidden hills + tree, ember afterglow |
+| 2026-07-10 | life | simulation | Conway's Game of Life running live: age-colored cells, self-reseeding, never repeats |
