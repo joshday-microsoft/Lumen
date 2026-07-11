@@ -30,6 +30,7 @@ from idotmatrix import (
 from idotmatrix.const import UUID_READ_DATA, UUID_WRITE_DATA
 
 from .canvas import Canvas, CanvasError, parse_color
+from .galaga import Galaga
 from .snake import SnakeGame
 
 log = logging.getLogger("lumen")
@@ -723,6 +724,102 @@ async def snake(body: dict = Body(default={})):
 
 @app.post("/snake/stop")
 async def snake_stop():
+    spiral_state["running"] = False
+    return {"stopped": True, "score": spiral_state["index"]}
+
+
+async def _graffiti_set(x: int, y: int, rgb) -> bool:
+    """Set one pixel via Graffiti (no full-panel refresh → no flash), resilient
+    to BLE drops. Returns False if the show was stopped while waiting."""
+    while spiral_state["running"]:
+        if is_connected():
+            try:
+                async with dev_lock:
+                    await IdmGraffiti().setPixel(rgb[0], rgb[1], rgb[2], x, y)
+                canvas.img.putpixel((x, y), rgb)
+                return True
+            except Exception as e:
+                state["last_error"] = f"{type(e).__name__}: {e}"
+                try:
+                    await cm.disconnect()
+                except Exception:
+                    pass
+                cm.client = None
+        await asyncio.sleep(1.0)
+    return False
+
+
+async def galaga_runner(delay: float):
+    """Self-playing Galaga mock. Renders by diffing frames and pushing only the
+    changed pixels via Graffiti — the panel is never full-refreshed, so it doesn't
+    flash. See server/galaga.py."""
+    import time as _t
+
+    n = canvas.size
+    game = Galaga(n, __import__("random").Random(int(_t.time())))
+    spiral_state.update(running=True, total=0, delay=delay, index=0)
+    state["display_mode"] = "galaga"
+    log.info("galaga: starting, %.3fs/frame on %dx%d", delay, n, n)
+
+    # one clean black frame to start (single image push; then pure Graffiti)
+    canvas.apply_ops([{"op": "clear", "color": "#000000"}])
+    if is_connected():
+        try:
+            async with dev_lock:
+                await push_canvas_locked()
+        except Exception:
+            pass
+    state["display_mode"] = "galaga"
+
+    prev: dict = {}
+    try:
+        while spiral_state["running"]:
+            cur = game.render()
+            spiral_state["index"] = game.score
+            # erase cells that went dark
+            for cell in list(prev):
+                if cell not in cur:
+                    if not spiral_state["running"]:
+                        break
+                    await _graffiti_set(cell[0], cell[1], (0, 0, 0))
+            # draw new / changed cells
+            for cell, color in cur.items():
+                if prev.get(cell) != color:
+                    if not spiral_state["running"]:
+                        break
+                    await _graffiti_set(cell[0], cell[1], color)
+            prev = cur
+
+            if game.dead:
+                log.info("galaga: game over — wave %d, score %d — resetting", game.wave, game.score)
+                await asyncio.sleep(0.6)
+                for cell in list(prev):        # graffiti-erase (no flash)
+                    if not spiral_state["running"]:
+                        break
+                    await _graffiti_set(cell[0], cell[1], (0, 0, 0))
+                prev = {}
+                game.reset_all()
+                continue
+
+            game.step()
+            if delay:
+                await asyncio.sleep(delay)
+        log.info("galaga: stopped at score %d", spiral_state["index"])
+    finally:
+        spiral_state["running"] = False
+
+
+@app.post("/galaga")
+async def galaga(body: dict = Body(default={})):
+    if _painter_busy():
+        raise HTTPException(409, "a show is already running — stop it first")
+    delay = max(0.0, float(body.get("delay", 0.04)))
+    spiral_state["task"] = asyncio.create_task(galaga_runner(delay))
+    return {"started": True, "delay": delay}
+
+
+@app.post("/galaga/stop")
+async def galaga_stop():
     spiral_state["running"] = False
     return {"stopped": True, "score": spiral_state["index"]}
 

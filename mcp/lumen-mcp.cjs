@@ -166,6 +166,14 @@ const TOOLS = [
     },
   },
   {
+    name: "lumen_galaga",
+    description: "Play a self-running Galaga mock on the wall: a colored formation of bugs up top, an AI ship at the bottom that strafes and fires, enemies that dive in swooping arcs and drop bombs, explosions, wave clears, and game-over resets. Runs until stopped (lumen_paint_stop) or another scene starts. delay = seconds per frame (default 0.04).",
+    inputSchema: {
+      type: "object",
+      properties: { delay: { type: "number", description: "seconds per frame (default 0.04; lower = faster)" } },
+    },
+  },
+  {
     name: "lumen_config",
     description: "Get/set panel config. Set size (16/32/64) if rendering looks wrong, or clear the saved BLE address to re-scan.",
     inputSchema: {
@@ -240,6 +248,8 @@ async function callTool(name, args) {
       return json(await api("POST", "/spiral", { delay: args.delay }));
     case "lumen_snake":
       return json(await api("POST", "/snake", { delay: args.delay }));
+    case "lumen_galaga":
+      return json(await api("POST", "/galaga", { delay: args.delay }));
     case "lumen_config":
       if (args.size === undefined && args.address === undefined) return json(await api("GET", "/status"));
       return json(await api("PUT", "/config", args));
