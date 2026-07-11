@@ -20,3 +20,4 @@ different — new subject, new mood, and rotate the medium (loop / painting / st
 | 2026-07-10 | life | simulation | Conway's Game of Life running live: age-colored cells, self-reseeding, never repeats |
 | 2026-07-10 | daylabs | loop | Day Labs mark reveal: L writes in, D orbits around, gleam pass |
 | 2026-07-10 | koi | painting | zen: one big kohaku koi swims up a teal pond, water washed first, ripples last |
+| 2026-07-10 | jellyfish | loop | bioluminescent bell pulsing in dark deep water, tentacles sway, motes drift up — serene |
