@@ -30,7 +30,7 @@ from idotmatrix import (
 from idotmatrix.const import UUID_READ_DATA, UUID_WRITE_DATA
 
 from .canvas import Canvas, CanvasError, parse_color
-from .snake import BG, BODY, FOOD, HEAD, SnakeGame
+from .snake import SnakeGame
 
 log = logging.getLogger("lumen")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -635,55 +635,48 @@ async def life_stop():
     return {"stopped": True, "generation": spiral_state["index"]}
 
 
-SNAKE_COLORS = {
-    HEAD: (230, 255, 235),
-    BODY: (40, 210, 90),
-    FOOD: (255, 45, 45),
-    BG: (2, 3, 8),
-}
+SNAKE_HEAD = (230, 255, 235)
+SNAKE_BODY = (40, 210, 90)
+SNAKE_FOOD = (255, 45, 45)
+SNAKE_BG = (2, 3, 8)
 
 
-async def _graffiti_px(x: int, y: int, rgb, label="snake") -> bool:
-    """Set one pixel via Graffiti, resilient to BLE drops; mirror to canvas.
-    Returns False if the show was stopped while waiting."""
-    while spiral_state["running"]:
-        if is_connected():
-            try:
-                async with dev_lock:
-                    await IdmGraffiti().setPixel(rgb[0], rgb[1], rgb[2], x, y)
-                canvas.img.putpixel((x, y), rgb)
-                return True
-            except Exception as e:
-                state["last_error"] = f"{type(e).__name__}: {e}"
-                log.warning("%s pixel %d,%d failed (%s), awaiting reconnect", label, x, y, e)
-                try:
-                    await cm.disconnect()
-                except Exception:
-                    pass
-                cm.client = None
-        await asyncio.sleep(1.5)
-    return False
+def _render_snake(game):
+    """Paint the whole board from game state — authoritative each frame, so no
+    stray 'dropping' pixels survive and BLE glitches self-heal next frame."""
+    img = canvas.img
+    n = canvas.size
+    for y in range(n):
+        for x in range(n):
+            img.putpixel((x, y), SNAKE_BG)
+    if game.food is not None:
+        img.putpixel(game.food, SNAKE_FOOD)
+    for i, (x, y) in enumerate(game.snake):
+        img.putpixel((x, y), SNAKE_HEAD if i == 0 else SNAKE_BODY)
 
 
-async def _snake_clear_and_paint(game):
-    """Full black frame, then paint the current snake + food via Graffiti."""
-    canvas.apply_ops([{"op": "clear", "color": "#020308"}])
-    if is_connected():
+async def _snake_push() -> bool:
+    """Push the current canvas; drop the link on failure so it can recover."""
+    if not is_connected():
+        return False
+    try:
+        async with dev_lock:
+            await push_canvas_locked()
+        state["display_mode"] = "snake"
+        return True
+    except Exception as e:
+        state["last_error"] = f"{type(e).__name__}: {e}"
         try:
-            async with dev_lock:
-                await push_canvas_locked()
+            await cm.disconnect()
         except Exception:
             pass
-    state["display_mode"] = "snake"
-    for (x, y, role) in game.full_cells():
-        if not spiral_state["running"]:
-            return
-        await _graffiti_px(x, y, SNAKE_COLORS[role])
+        cm.client = None
+        return False
 
 
 async def snake_runner(delay: float):
-    """Self-playing Snake on the wall. Torus board, so the only death is a
-    self-collision — on which it flashes red and resets. See server/snake.py."""
+    """Self-playing Snake on the wall (classic rules — walls and self are lethal).
+    On any crash it hard-resets to a fresh game. See server/snake.py."""
     import time as _t
 
     n = canvas.size
@@ -692,33 +685,27 @@ async def snake_runner(delay: float):
     state["display_mode"] = "snake"
     log.info("snake: starting, %.3fs/step on %dx%d", delay, n, n)
     try:
-        await _snake_clear_and_paint(game)
+        _render_snake(game)
+        while spiral_state["running"] and not await _snake_push():
+            await asyncio.sleep(1.5)
         await asyncio.sleep(delay)
         while spiral_state["running"]:
-            changes = game.step()
+            game.step()
             spiral_state["index"] = game.score
             if game.dead:
-                log.info("snake: self-collision at length %d, score %d — resetting",
+                log.info("snake: crash at length %d, score %d — hard reset",
                          len(game.snake), game.score)
-                # flash the whole snake red (one full-frame push, not per-pixel)
-                for (x, y) in game.body_cells():
-                    canvas.img.putpixel((x, y), (255, 60, 40))
-                if is_connected():
-                    try:
-                        async with dev_lock:
-                            await push_canvas_locked()
-                    except Exception:
-                        pass
-                    state["display_mode"] = "snake"
-                await asyncio.sleep(0.8)
+                canvas.apply_ops([{"op": "clear", "color": "#020308"}])  # blink to black
+                await _snake_push()
+                await asyncio.sleep(0.15)
                 game.reset()
-                await _snake_clear_and_paint(game)
+                _render_snake(game)
+                await _snake_push()
                 await asyncio.sleep(delay)
                 continue
-            for (x, y, role) in changes:
-                if not spiral_state["running"]:
-                    break
-                await _graffiti_px(x, y, SNAKE_COLORS[role])
+            _render_snake(game)
+            while spiral_state["running"] and not await _snake_push():
+                await asyncio.sleep(1.5)
             await asyncio.sleep(delay)
         log.info("snake: stopped at score %d", spiral_state["index"])
     finally:
@@ -729,7 +716,7 @@ async def snake_runner(delay: float):
 async def snake(body: dict = Body(default={})):
     if _painter_busy():
         raise HTTPException(409, "a show is already running — stop it first")
-    delay = max(0.03, float(body.get("delay", 0.09)))
+    delay = max(0.0, float(body.get("delay", 0.05)))
     spiral_state["task"] = asyncio.create_task(snake_runner(delay))
     return {"started": True, "delay": delay}
 

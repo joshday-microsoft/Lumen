@@ -1,26 +1,20 @@
-"""Self-playing Snake for the LED wall.
+"""Self-playing Snake for the LED wall — classic rules.
 
-Pure game logic (no I/O) so it stays testable. The board is walled (bounded), and
-the AI treats walls as blocked cells — so it never drives into an edge. That means
-the only way the snake dies is by trapping itself against its own body, which is
-the reset trigger Josh asked for, while keeping the snake one clean continuous
-shape on screen (no edge-wrapping into disconnected pieces).
+Pure game logic (no I/O) so it stays testable. Real Snake rules:
+  - The board has BORDERS. Running into a wall kills the snake. No wrap-around.
+  - Running into your own body kills the snake.
+  - Either death is terminal (`dead`) → the renderer does a hard reset.
 
-The AI does BFS toward the food, with a flood-fill survival fallback when the food
-isn't safely reachable. It plays a purposeful game, grows, and eventually boxes
-itself in — then it's `dead`.
-
-step() returns the *changed* cells for the frame so the renderer can update only
-those pixels (fast over BLE) instead of redrawing the whole board.
+The AI is a *hungry* snake, not a perfect one: it takes the shortest safe path to
+the food when one exists (BFS), but when the food is walled off it charges greedily
+toward it and can splat into a wall or its own tail. So it plays a real game and
+genuinely dies — no immortal wall-crawling.
 """
 
 from __future__ import annotations
 
 import random
 from collections import deque
-
-# roles the renderer maps to colors
-HEAD, BODY, BG, FOOD = "head", "body", "bg", "food"
 
 DIRS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
@@ -42,17 +36,21 @@ class SnakeGame:
         self.steps = 0
         self._spawn_food()
 
-    # ---- helpers ----
+    def _in_bounds(self, cell) -> bool:
+        x, y = cell
+        return 0 <= x < self.n and 0 <= y < self.n
+
     def _spawn_food(self) -> None:
         free = [(x, y) for y in range(self.n) for x in range(self.n) if (x, y) not in self.body]
         self.food = self.rng.choice(free) if free else None
 
-    def _neighbors(self, cell):
+    def _free_neighbors(self, cell, blocked):
+        """In-bounds, non-blocked neighbors — used for pathfinding only."""
         x, y = cell
         for dx, dy in DIRS:
-            nx, ny = x + dx, y + dy
-            if 0 <= nx < self.n and 0 <= ny < self.n:  # walled board, no wrap
-                yield (nx, ny)
+            nb = (x + dx, y + dy)
+            if self._in_bounds(nb) and nb not in blocked:
+                yield nb
 
     def _bfs(self, start, goal, blocked):
         if goal is None:
@@ -67,87 +65,57 @@ class SnakeGame:
                     cur = prev[cur]
                     path.append(cur)
                 return path[::-1]
-            for nb in self._neighbors(cur):
-                if nb not in prev and nb not in blocked:
+            for nb in self._free_neighbors(cur, blocked):
+                if nb not in prev:
                     prev[nb] = cur
                     q.append(nb)
         return None
 
-    def _open_space(self, start, blocked, limit=80):
-        seen = {start}
-        q = deque([start])
-        while q and len(seen) < limit:
-            cur = q.popleft()
-            for nb in self._neighbors(cur):
-                if nb not in seen and nb not in blocked:
-                    seen.add(nb)
-                    q.append(nb)
-        return len(seen)
-
     def _choose(self):
+        """Return the next head cell — which MAY be a wall (out of bounds) or the
+        snake's own body when the snake has boxed itself in. step() turns that into
+        a death. No survival cheat: a hungry snake commits to chasing the food."""
         head = self.snake[0]
         blocked = set(self.body)
         if self.grow == 0:
-            blocked.discard(self.snake[-1])  # the tail cell will vacate this move
+            blocked.discard(self.snake[-1])  # the tail cell vacates this move
         path = self._bfs(head, self.food, blocked)
         if path and len(path) >= 2:
             return path[1]
-        # no safe path to food: survive — head for the most open space
-        best, best_space = None, -1
-        for nb in self._neighbors(head):
-            if nb in blocked:
-                continue
-            sp = self._open_space(nb, blocked)
-            if sp > best_space:
-                best_space, best = sp, nb
+        # boxed off from the food: prefer a still-safe move, else charge greedily
+        # toward the food (Manhattan) — which may well be into a wall or the body.
+        fx, fy = self.food if self.food else head
+        hx, hy = head
+        best, best_key = None, None
+        for dx, dy in DIRS:
+            nb = (hx + dx, hy + dy)
+            safe = self._in_bounds(nb) and nb not in blocked
+            dist = abs(nb[0] - fx) + abs(nb[1] - fy)
+            key = (0 if safe else 1, dist)  # safe first, then closest to food
+            if best_key is None or key < best_key:
+                best_key, best = key, nb
         return best
 
-    # ---- main tick ----
-    def step(self):
-        """Advance one tick. Returns a list of (x, y, role) changed cells.
-        Sets self.dead on self-collision (no change list needed then)."""
+    def step(self) -> None:
+        """Advance one tick; set self.dead on wall- or self-collision."""
         self.steps += 1
-        old_head = self.snake[0]
         nxt = self._choose()
-        if nxt is None:
+        if not self._in_bounds(nxt):          # hit a border
             self.dead = True
-            return []
-        tail = self.snake[-1]
+            return
         frees_tail = self.grow == 0
-        occupied = self.body - ({tail} if frees_tail else set())
-        if nxt in occupied:
+        occupied = self.body - ({self.snake[-1]} if frees_tail else set())
+        if nxt in occupied:                    # ran into itself
             self.dead = True
-            return []
+            return
 
-        changes = [(old_head[0], old_head[1], BODY), (nxt[0], nxt[1], HEAD)]
         self.snake.appendleft(nxt)
         self.body.add(nxt)
-
-        ate = nxt == self.food
-        if ate:
+        if nxt == self.food:
             self.grow += 3
             self.score += 1
             self._spawn_food()
-            if self.food is not None:
-                changes.append((self.food[0], self.food[1], FOOD))
-
         if self.grow > 0:
             self.grow -= 1
         else:
-            t = self.snake.pop()
-            self.body.discard(t)
-            if t != nxt:
-                changes.append((t[0], t[1], BG))
-        return changes
-
-    def full_cells(self):
-        """All lit cells for a from-scratch paint (start / after reset)."""
-        cells = []
-        for i, (x, y) in enumerate(self.snake):
-            cells.append((x, y, HEAD if i == 0 else BODY))
-        if self.food is not None:
-            cells.append((self.food[0], self.food[1], FOOD))
-        return cells
-
-    def body_cells(self):
-        return list(self.snake)
+            self.body.discard(self.snake.pop())
