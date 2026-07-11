@@ -44,9 +44,12 @@ logging.getLogger().addHandler(_fh)
 
 DEFAULT_SCROLL_FONT = r"C:\Windows\Fonts\arialbd.ttf"
 
-# panel firmware limits, learned the hard way: >16 frames freezes the decoder
-# (requires power-cycle); >1 protocol block risks the same. Enforced on /gif.
-MAX_GIF_FRAMES = 16
+# panel firmware limits, measured 2026-07-10 with instrumented frame-counter
+# probes (art/frametest.py): 23 frames loops clean, 24 freezes the decoder
+# until power-cycle. Byte limit = one protocol block (multi-block untested
+# with the safe encoder). Enforced on /gif; body {"force":true} bypasses
+# for boundary testing only.
+MAX_GIF_FRAMES = 23
 MAX_GIF_BYTES = 4080
 
 
@@ -380,10 +383,13 @@ async def gif(body: dict = Body(...)):
 
     with PilImage.open(_io.BytesIO(gif_bytes)) as chk:
         nframes = getattr(chk, "n_frames", 1)
-    if nframes > MAX_GIF_FRAMES:
-        raise HTTPException(400, f"GIF has {nframes} frames — the panel's decoder freezes above {MAX_GIF_FRAMES} (needs a power-cycle to recover). Re-cut to <= {MAX_GIF_FRAMES} frames.")
-    if len(gif_bytes) > MAX_GIF_BYTES:
-        raise HTTPException(400, f"GIF is {len(gif_bytes)} bytes — must fit one protocol block (<= {MAX_GIF_BYTES}). Fewer frames / smaller palette.")
+    if body.get("force"):
+        log.warning("gif limits bypassed via force=true (%d frames, %d bytes) — boundary testing", nframes, len(gif_bytes))
+    else:
+        if nframes > MAX_GIF_FRAMES:
+            raise HTTPException(400, f"GIF has {nframes} frames — the panel's decoder freezes above {MAX_GIF_FRAMES} (needs a power-cycle to recover). Re-cut to <= {MAX_GIF_FRAMES} frames.")
+        if len(gif_bytes) > MAX_GIF_BYTES:
+            raise HTTPException(400, f"GIF is {len(gif_bytes)} bytes — must fit one protocol block (<= {MAX_GIF_BYTES}). Fewer frames / smaller palette.")
 
     async def _send():
         await send_gif_flow_controlled(gif_bytes)
