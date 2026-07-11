@@ -5,6 +5,7 @@ Run:  .venv\\Scripts\\python.exe -m uvicorn server.main:app --port 7788 --app-di
 """
 
 import asyncio
+import colorsys
 import json
 import logging
 import time
@@ -21,6 +22,7 @@ from idotmatrix import (
     ConnectionManager,
     FullscreenColor,
     Gif as IdmGif,
+    Graffiti as IdmGraffiti,
     Image as IdmImage,
     Text as IdmText,
 )
@@ -204,6 +206,7 @@ async def status():
         "last_push": state["last_push"],
         "last_error": state["last_error"],
         "scanning": state["scanning"],
+        "spiral": {k: spiral_state[k] for k in ("running", "index", "total", "delay")},
     }
 
 
@@ -452,6 +455,96 @@ async def screen(body: dict = Body(...)):
 
     await device_call(_send, mode=("canvas" if on else "off"))
     return {"ok": True, "on": on}
+
+
+spiral_state = {"running": False, "index": 0, "total": 0, "delay": 1.0, "task": None}
+
+
+def spiral_coords(n: int):
+    """Outside-in clockwise spiral over the full n x n grid."""
+    coords = []
+    top, left, bottom, right = 0, 0, n - 1, n - 1
+    while top <= bottom and left <= right:
+        for x in range(left, right + 1):
+            coords.append((x, top))
+        for y in range(top + 1, bottom + 1):
+            coords.append((right, y))
+        if bottom > top:
+            for x in range(right - 1, left - 1, -1):
+                coords.append((x, bottom))
+        if right > left:
+            for y in range(bottom - 1, top, -1):
+                coords.append((left, y))
+        top += 1
+        left += 1
+        bottom -= 1
+        right -= 1
+    return coords
+
+
+async def spiral_runner(delay: float):
+    """Paint one LED per `delay` seconds via Graffiti mode, spiraling inward,
+    hue sweeping the full spectrum. Survives BLE drops (resumes same pixel)."""
+    coords = spiral_coords(canvas.size)
+    total = len(coords)
+    spiral_state.update(running=True, total=total, delay=delay)
+    log.info("spiral start: %d pixels, %.2fs each (~%.1f min)", total, delay, total * delay / 60)
+    try:
+        canvas.apply_ops([{"op": "clear"}])   # clean slate on panel + mirror
+        if is_connected():
+            try:
+                async with dev_lock:
+                    await push_canvas_locked()
+            except Exception:
+                pass
+        state["display_mode"] = "graffiti"
+        for i in range(spiral_state["index"], total):
+            spiral_state["index"] = i
+            x, y = coords[i]
+            r, g, b = (round(c * 255) for c in colorsys.hsv_to_rgb(i / (total - 1), 1.0, 1.0))
+            while spiral_state["running"]:
+                if is_connected():
+                    try:
+                        async with dev_lock:
+                            await IdmGraffiti().setPixel(r, g, b, x, y)
+                        break
+                    except Exception as e:
+                        state["last_error"] = f"{type(e).__name__}: {e}"
+                        log.warning("spiral pixel %d failed (%s), waiting for reconnect", i, e)
+                        try:
+                            await cm.disconnect()
+                        except Exception:
+                            pass
+                        cm.client = None
+                await asyncio.sleep(2)
+            if not spiral_state["running"]:
+                log.info("spiral stopped at pixel %d", i)
+                return
+            canvas.img.putpixel((x, y), (r, g, b))
+            if i % 64 == 0:
+                log.info("spiral progress: %d/%d", i, total)
+            await asyncio.sleep(delay)
+        log.info("spiral complete: %d pixels", total)
+    finally:
+        spiral_state["running"] = False
+
+
+@app.post("/spiral")
+async def spiral(body: dict = Body(default={})):
+    task = spiral_state.get("task")
+    if task and not task.done():
+        raise HTTPException(409, "spiral already running — POST /spiral/stop first")
+    delay = max(0.05, float(body.get("delay", 1.0)))
+    spiral_state["index"] = max(0, int(body.get("start", 0)))
+    spiral_state["task"] = asyncio.create_task(spiral_runner(delay))
+    total = canvas.size * canvas.size
+    return {"started": True, "delay": delay, "total": total, "eta_min": round(total * delay / 60, 1)}
+
+
+@app.post("/spiral/stop")
+async def spiral_stop():
+    spiral_state["running"] = False
+    return {"stopped": True, "at": spiral_state["index"]}
 
 
 @app.post("/scan")
