@@ -729,15 +729,27 @@ async def snake_stop():
     return {"stopped": True, "score": spiral_state["index"]}
 
 
+def _graffiti_cmd(r: int, g: int, b: int, x: int, y: int) -> bytearray:
+    """The 10-byte Graffiti setPixel command (from idotmatrix Graffiti.setPixel)."""
+    return bytearray([10, 0, 5, 1, 0, r % 256, g % 256, b % 256, x % 256, y % 256])
+
+
+# Fire-and-forget writes are fast but drop pixels when fired back-to-back (→ stray
+# dots). Acked writes don't drop but are ~6x slower. Pacing the fire-and-forget
+# writes a few ms apart (like Lumen's paint engine) keeps them fast AND reliable.
+GRAFFITI_PACE = 0.015
+
+
 async def _graffiti_set(x: int, y: int, rgb) -> bool:
-    """Set one pixel via Graffiti (no full-panel refresh → no flash), resilient
-    to BLE drops. Returns False if the show was stopped while waiting."""
+    """Set one pixel via Graffiti (no full-panel refresh → no flash), paced so the
+    write actually lands. Returns False if the show was stopped while waiting."""
     while spiral_state["running"]:
         if is_connected():
             try:
                 async with dev_lock:
-                    await IdmGraffiti().setPixel(rgb[0], rgb[1], rgb[2], x, y)
+                    await cm.send(_graffiti_cmd(rgb[0], rgb[1], rgb[2], x, y), response=False)
                 canvas.img.putpixel((x, y), rgb)
+                await asyncio.sleep(GRAFFITI_PACE)
                 return True
             except Exception as e:
                 state["last_error"] = f"{type(e).__name__}: {e}"
