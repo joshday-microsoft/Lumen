@@ -5,10 +5,9 @@ Pure game logic (no I/O) so it stays testable. Real Snake rules:
   - Running into your own body kills the snake.
   - Either death is terminal (`dead`) → the renderer does a hard reset.
 
-The AI is a *hungry* snake, not a perfect one: it takes the shortest safe path to
-the food when one exists (BFS), but when the food is walled off it charges greedily
-toward it and can splat into a wall or its own tail. So it plays a real game and
-genuinely dies — no immortal wall-crawling.
+The AI is deliberately DUMB: no pathfinding. It mostly beelines toward the food but
+wanders off at random (see WANDER), so it boxes itself in fast and dies often —
+short, erratic, entertaining games rather than a near-perfect immortal snake.
 """
 
 from __future__ import annotations
@@ -44,57 +43,32 @@ class SnakeGame:
         free = [(x, y) for y in range(self.n) for x in range(self.n) if (x, y) not in self.body]
         self.food = self.rng.choice(free) if free else None
 
-    def _free_neighbors(self, cell, blocked):
-        """In-bounds, non-blocked neighbors — used for pathfinding only."""
-        x, y = cell
-        for dx, dy in DIRS:
-            nb = (x + dx, y + dy)
-            if self._in_bounds(nb) and nb not in blocked:
-                yield nb
-
-    def _bfs(self, start, goal, blocked):
-        if goal is None:
-            return None
-        prev = {start: None}
-        q = deque([start])
-        while q:
-            cur = q.popleft()
-            if cur == goal:
-                path = [cur]
-                while prev[cur] is not None:
-                    cur = prev[cur]
-                    path.append(cur)
-                return path[::-1]
-            for nb in self._free_neighbors(cur, blocked):
-                if nb not in prev:
-                    prev[nb] = cur
-                    q.append(nb)
-        return None
+    WANDER = 0.15  # chance of a random move instead of beelining — the "dumb" knob
 
     def _choose(self):
-        """Return the next head cell — which MAY be a wall (out of bounds) or the
-        snake's own body when the snake has boxed itself in. step() turns that into
-        a death. No survival cheat: a hungry snake commits to chasing the food."""
+        """A dumb, hungry snake: no pathfinding. It mostly beelines toward the food
+        (nearest safe step by Manhattan distance) but WANDERs off at random, so it
+        boxes itself in fast and dies often. The returned cell MAY be a wall (out of
+        bounds) or its own body — step() turns that into a death."""
         head = self.snake[0]
+        hx, hy = head
+        fx, fy = self.food if self.food else head
         blocked = set(self.body)
         if self.grow == 0:
             blocked.discard(self.snake[-1])  # the tail cell vacates this move
-        path = self._bfs(head, self.food, blocked)
-        if path and len(path) >= 2:
-            return path[1]
-        # boxed off from the food: prefer a still-safe move, else charge greedily
-        # toward the food (Manhattan) — which may well be into a wall or the body.
-        fx, fy = self.food if self.food else head
-        hx, hy = head
-        best, best_key = None, None
+
+        moves = []
         for dx, dy in DIRS:
             nb = (hx + dx, hy + dy)
             safe = self._in_bounds(nb) and nb not in blocked
             dist = abs(nb[0] - fx) + abs(nb[1] - fy)
-            key = (0 if safe else 1, dist)  # safe first, then closest to food
-            if best_key is None or key < best_key:
-                best_key, best = key, nb
-        return best
+            moves.append((0 if safe else 1, dist, nb))
+
+        safe_moves = [m for m in moves if m[0] == 0]
+        if safe_moves and self.rng.random() < self.WANDER:
+            return self.rng.choice(safe_moves)[2]   # wander (a "mistake")
+        moves.sort(key=lambda m: (m[0], m[1]))       # safe first, then toward food
+        return moves[0][2]
 
     def step(self) -> None:
         """Advance one tick; set self.dead on wall- or self-collision."""
