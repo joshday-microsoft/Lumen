@@ -174,6 +174,14 @@ const TOOLS = [
     },
   },
   {
+    name: "lumen_pacman",
+    description: "Play a self-running Pac-Man on the wall: the classic 28x31 maze, an AI Pac-Man eating dots, and the four real ghosts (Blinky/Pinky/Inky/Clyde) with their authentic chase/scatter targeting. Energizers turn ghosts frightened-blue to be eaten; cleared boards and lost lives reset. Runs until stopped (lumen_paint_stop) or another scene starts. delay = seconds per frame (default 0.09).",
+    inputSchema: {
+      type: "object",
+      properties: { delay: { type: "number", description: "seconds per frame (default 0.09; lower = faster)" } },
+    },
+  },
+  {
     name: "lumen_config",
     description: "Get/set panel config. Set size (16/32/64) if rendering looks wrong, or clear the saved BLE address to re-scan.",
     inputSchema: {
@@ -250,6 +258,8 @@ async function callTool(name, args) {
       return json(await api("POST", "/snake", { delay: args.delay }));
     case "lumen_galaga":
       return json(await api("POST", "/galaga", { delay: args.delay }));
+    case "lumen_pacman":
+      return json(await api("POST", "/pacman", { delay: args.delay }));
     case "lumen_config":
       if (args.size === undefined && args.address === undefined) return json(await api("GET", "/status"));
       return json(await api("PUT", "/config", args));

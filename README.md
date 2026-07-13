@@ -39,6 +39,8 @@ latches on within ~15 s. The address is cached in `config.json` after first find
 | `POST /notify {text, seconds?}` | scroll message, then auto-restore canvas |
 | `POST /image {path}` | fit an image file to the panel |
 | `POST /gif {path}` | play an animated GIF |
+| `POST /pacman {delay?}` | self-playing arcade Pac-Man (real ghost AI); `POST /pacman/stop` to end |
+| `POST /snake` / `POST /galaga` / `POST /life` | other self-running shows (each has a `/stop`) |
 | `POST /clock {style?, color?}` | built-in clock face |
 | `POST /color {color}` | fullscreen color |
 | `POST /brightness {percent}` / `POST /screen {on}` | panel controls |

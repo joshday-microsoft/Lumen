@@ -31,6 +31,7 @@ from idotmatrix.const import UUID_READ_DATA, UUID_WRITE_DATA
 
 from .canvas import Canvas, CanvasError, parse_color
 from .galaga import Galaga
+from .pacman import PacMan
 from .snake import SnakeGame
 
 log = logging.getLogger("lumen")
@@ -833,6 +834,78 @@ async def galaga(body: dict = Body(default={})):
 
 @app.post("/galaga/stop")
 async def galaga_stop():
+    spiral_state["running"] = False
+    return {"stopped": True, "score": spiral_state["index"]}
+
+
+async def pacman_runner(delay: float):
+    """Self-playing Pac-Man. Faithful maze + real ghost AI (see server/pacman.py).
+    Renders by diffing frames and pushing only changed pixels via Graffiti, so the
+    panel is never full-refreshed (no flashing). One black push on level reset."""
+    import time as _t
+
+    n = canvas.size
+    game = PacMan(n, __import__("random").Random(int(_t.time())))
+    spiral_state.update(running=True, total=0, delay=delay, index=0)
+    state["display_mode"] = "pacman"
+    log.info("pacman: starting, %.3fs/frame on %dx%d", delay, n, n)
+
+    canvas.apply_ops([{"op": "clear", "color": "#000000"}])
+    if is_connected():
+        try:
+            async with dev_lock:
+                await push_canvas_locked()
+        except Exception:
+            pass
+    state["display_mode"] = "pacman"
+
+    prev: dict = {}
+    try:
+        while spiral_state["running"]:
+            cur = game.render()
+            spiral_state["index"] = game.score
+            for cell in list(prev):                      # erase vacated cells
+                if cur.get(cell) != prev[cell] and cell not in cur:
+                    if not spiral_state["running"]:
+                        break
+                    await _graffiti_set(cell[0], cell[1], (0, 0, 0))
+            for cell, color in cur.items():              # draw new / changed
+                if prev.get(cell) != color:
+                    if not spiral_state["running"]:
+                        break
+                    await _graffiti_set(cell[0], cell[1], color)
+            prev = cur
+
+            if game.dead:                                # level cleared / all lives lost
+                log.info("pacman: round over — score %d — resetting", game.score)
+                await asyncio.sleep(0.7)
+                for cell in list(prev):
+                    if not spiral_state["running"]:
+                        break
+                    await _graffiti_set(cell[0], cell[1], (0, 0, 0))
+                prev = {}
+                game.reset_all()
+                continue
+
+            game.step()
+            if delay:
+                await asyncio.sleep(delay)
+        log.info("pacman: stopped at score %d", spiral_state["index"])
+    finally:
+        spiral_state["running"] = False
+
+
+@app.post("/pacman")
+async def pacman(body: dict = Body(default={})):
+    if _painter_busy():
+        raise HTTPException(409, "a show is already running — stop it first")
+    delay = max(0.0, float(body.get("delay", 0.09)))
+    spiral_state["task"] = asyncio.create_task(pacman_runner(delay))
+    return {"started": True, "delay": delay}
+
+
+@app.post("/pacman/stop")
+async def pacman_stop():
     spiral_state["running"] = False
     return {"stopped": True, "score": spiral_state["index"]}
 
