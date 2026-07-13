@@ -23,3 +23,4 @@ different — new subject, new mood, and rotate the medium (loop / painting / st
 | 2026-07-10 | jellyfish | loop | bioluminescent bell pulsing in dark deep water, tentacles sway, motes drift up — serene |
 | 2026-07-10 | aurora | loop | northern lights ripple over snowy peaks, one warm cabin window - for Eli, Alaska trip nod |
 | 2026-07-12 | phoenix | painting | firebird rising on a dark sky: tail plumes trail in, wings unfurl tip-to-shoulder, white-hot spine, sparks drift up — fierce/majestic |
+| 2026-07-13 | lavalamp | loop | retro lava lamp: metaball blobs of hot wax rise/pinch/pool over a glowing bulb, hot-yellow to cool-red, dark violet fluid — chill/hypnotic |
