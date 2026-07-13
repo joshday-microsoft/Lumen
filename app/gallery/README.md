@@ -10,8 +10,15 @@ send any piece straight to the LED wall.
 - **On the wall now** — mirrors the panel's current canvas, updated live.
 - **Click** a piece to select, **Send to Wall** (or double-click) pushes it:
   stills via `POST /image`, GIF loops via `POST /gif`.
+- **Play a show** — start the self-playing games (Pac-Man / Snake / Galaga)
+  or Conway's Life on the wall; **Stop show** halts it and returns the wall to
+  the Day Labs logo default.
 - Connection status, brightness slider, screen on/off — all talk to the
   Lumen daemon at `http://127.0.0.1:7788`.
+
+The Day Labs mark (`art/daylabs-mark-32.png`) is the daemon's default boot
+image — what the panel shows on power-up until a scene, game, or send replaces
+it.
 
 Pure Python stdlib + Tkinter + Pillow (already in the repo's `.venv`) — no
 extra installs, no packaging step.

@@ -29,8 +29,12 @@ ART = ROOT / "art"
 ICON = Path(__file__).resolve().parent / "icon.ico"
 
 THUMB = 104
-WALL_PX = 128
+WALL_PX = 116
 COLS = 3
+
+# self-playing shows the daemon can run (start endpoint per label)
+GAMES = [("Pac-Man", "/pacman"), ("Snake", "/snake"),
+         ("Galaga", "/galaga"), ("Life", "/life")]
 
 # non-art helpers living in art/ that shouldn't show in the gallery
 IGNORE_SUBSTR = ("strip", "preview", "frametest", "-1x", "icon", "mark-")
@@ -182,7 +186,23 @@ class App:
                                   bg=ACCENT, activebackground="#79cbff", activeforeground="#062033",
                                   relief="flat", bd=0, cursor="hand2", state="disabled",
                                   command=self._send_selected)
-        self.send_btn.pack(fill="x", ipady=7, pady=(0, 14))
+        self.send_btn.pack(fill="x", ipady=7, pady=(0, 12))
+
+        # games / self-playing shows
+        tk.Label(side, text="PLAY A SHOW", font=self.f_small, fg=MUTED, bg=BG).pack(anchor="w", pady=(0, 3))
+        gwrap = tk.Frame(side, bg=BG)
+        gwrap.pack(fill="x")
+        gwrap.columnconfigure(0, weight=1)
+        gwrap.columnconfigure(1, weight=1)
+        for i, (label, ep) in enumerate(GAMES):
+            tk.Button(gwrap, text=label, font=self.f, fg=TEXT, bg=CARD,
+                      activebackground=ACCENT, activeforeground="#062033", relief="flat",
+                      bd=0, cursor="hand2",
+                      command=lambda e=ep, l=label: self._start_game(e, l)
+                      ).grid(row=i // 2, column=i % 2, sticky="nsew", padx=2, pady=2, ipady=4)
+        tk.Button(side, text="■  Stop show", font=self.f, fg="#f0c4bb", bg="#3a1f1f",
+                  activebackground=DANGER, activeforeground="#ffffff", relief="flat", bd=0,
+                  cursor="hand2", command=self._stop_show).pack(fill="x", pady=(4, 14), ipady=3)
 
         # brightness
         br = tk.Frame(side, bg=BG)
@@ -297,6 +317,11 @@ class App:
 
         def work():
             try:
+                try:                                   # stop any running show so the image sticks
+                    http_json("POST", "/paint/stop")
+                    time.sleep(0.35)
+                except Exception:
+                    pass
                 http_json("POST", endpoint, {"path": str(path)}, timeout=90)
                 self.q.put(("sent", (path.stem, True, "")))
             except urllib.error.HTTPError as e:
@@ -325,6 +350,53 @@ class App:
             self.q.put(("toast", (f"✓ {label}", GREEN)))
         except Exception as e:
             self.q.put(("toast", (f"✗ {label}: {str(e)[:120]}", DANGER)))
+
+    def _start_game(self, endpoint, label):
+        self._set_toast(f"Starting {label}…", ACCENT)
+
+        def work():
+            try:                                       # clear any running show first
+                http_json("POST", "/paint/stop")
+            except Exception:
+                pass
+            for _ in range(8):                         # then start, retrying while it frees
+                try:
+                    http_json("POST", endpoint, {})
+                    self.q.put(("toast", (f"▶ {label} playing on the wall", GREEN)))
+                    return
+                except urllib.error.HTTPError as e:
+                    if e.code == 409:
+                        time.sleep(0.35)
+                        continue
+                    self.q.put(("toast", (f"✗ {label}: {e.read().decode()[:100]}", DANGER)))
+                    return
+                except Exception as e:
+                    self.q.put(("toast", (f"✗ {label}: {str(e)[:100]}", DANGER)))
+                    return
+            self.q.put(("toast", (f"✗ {label}: show still busy", DANGER)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _stop_show(self):
+        logo = ART / "daylabs-mark-32.png"
+
+        def work():
+            try:
+                http_json("POST", "/paint/stop")
+                time.sleep(0.3)
+            except Exception:
+                pass
+            if logo.exists():                          # return to the Day Labs default
+                try:
+                    http_json("POST", "/image", {"path": str(logo)})
+                    self.q.put(("toast", ("✓ stopped — back to Day Labs", GREEN)))
+                    return
+                except Exception as e:
+                    self.q.put(("toast", (f"✗ stop: {str(e)[:100]}", DANGER)))
+                    return
+            self.q.put(("toast", ("✓ stopped the show", GREEN)))
+
+        threading.Thread(target=work, daemon=True).start()
 
     # ---------- polling ----------
     def _poll_loop(self):

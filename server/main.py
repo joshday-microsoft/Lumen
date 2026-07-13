@@ -179,12 +179,19 @@ async def connection_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # boot splash on the canvas so the first connect shows something
+    # default boot image: the Day Labs mark. It's what the first connect pushes
+    # (and therefore what the panel stores and redisplays on power-up) until a
+    # scene, game, or gallery send replaces it.
     if all(p == (0, 0, 0) for p in canvas.img.getdata()):
-        canvas.apply_ops([
-            {"op": "rect", "x": 0, "y": 0, "w": canvas.size, "h": canvas.size, "outline": "#123a5c"},
-            {"op": "text", "text": "LUMEN", "y": canvas.size // 2 - 3, "align": "center", "color": "#4db8ff"},
-        ])
+        logo = ROOT / "art" / "daylabs-mark-32.png"
+        try:
+            canvas.apply_ops([{"op": "image", "path": str(logo)}])
+        except Exception as e:
+            log.warning("boot logo failed (%s) — using text splash", e)
+            canvas.apply_ops([
+                {"op": "rect", "x": 0, "y": 0, "w": canvas.size, "h": canvas.size, "outline": "#123a5c"},
+                {"op": "text", "text": "LUMEN", "y": canvas.size // 2 - 3, "align": "center", "color": "#4db8ff"},
+            ])
     task = asyncio.create_task(connection_loop())
     yield
     task.cancel()
