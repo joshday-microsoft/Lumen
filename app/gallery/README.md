@@ -20,14 +20,18 @@ The Day Labs mark (`art/daylabs-mark-32.png`) is the daemon's default boot
 image — what the panel shows on power-up until a scene, game, or send replaces
 it.
 
-Pure Python stdlib + Tkinter + Pillow (already in the repo's `.venv`) — no
-extra installs, no packaging step.
+Pure Python stdlib + Tkinter + Pillow (in the repo's `.venv`); ships as a
+standalone Windows `.exe` via PyInstaller.
 
-## Run
+## Build (produces the .exe)
 
 ```powershell
-.venv\Scripts\pythonw.exe app\gallery\lumen_gallery.pyw
+powershell -File app\gallery\build.ps1
 ```
+
+Installs PyInstaller if needed and builds `dist\Lumen Gallery.exe` (one file,
+windowed, icon embedded). Re-run after changing the source. The exe reads the
+live `art/` folder — it is not bundled — so new daily pieces still appear.
 
 ## Desktop shortcut
 
@@ -35,8 +39,15 @@ extra installs, no packaging step.
 powershell -File app\gallery\install-shortcut.ps1
 ```
 
-Creates **Lumen Gallery** on the Desktop (windowless `pythonw` launch, custom
-icon). Re-run `make_icon.py` to regenerate `icon.ico`.
+Creates **Lumen Gallery** on the Desktop pointing at the built exe (falls back
+to a windowless `pythonw` launch if the exe isn't built yet). Re-run
+`make_icon.py` to regenerate `icon.ico`.
+
+## Run without building
+
+```powershell
+.venv\Scripts\pythonw.exe app\gallery\lumen_gallery.pyw
+```
 
 The daemon must be running (it auto-starts at logon; otherwise
 `powershell .\start-lumen.ps1`).

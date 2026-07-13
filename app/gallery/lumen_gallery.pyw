@@ -24,9 +24,33 @@ from tkinter import font as tkfont
 from PIL import Image, ImageTk
 
 DAEMON = "http://127.0.0.1:7788"
-ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resource(name):
+    """A bundled resource, whether running as a script or a PyInstaller exe."""
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / name          # noqa: SLF001  (PyInstaller temp dir)
+    return Path(__file__).resolve().parent / name
+
+
+def _find_root():
+    """Locate the Lumen repo (holds art/ + server/) from the script or exe."""
+    starts = []
+    if getattr(sys, "frozen", False):
+        starts.append(Path(sys.executable).resolve().parent)
+    starts.append(Path(__file__).resolve().parent)
+    for start in starts:
+        p = start
+        for _ in range(6):
+            if (p / "art").is_dir() and (p / "server").is_dir():
+                return p
+            p = p.parent
+    return Path(r"C:\Users\JoshDay\source\repos\Lumen")   # known-good fallback
+
+
+ROOT = _find_root()
 ART = ROOT / "art"
-ICON = Path(__file__).resolve().parent / "icon.ico"
+ICON = _resource("icon.ico")
 
 THUMB = 104
 WALL_PX = 116

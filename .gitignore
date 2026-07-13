@@ -3,3 +3,8 @@ __pycache__/
 tmp/
 *.pyc
 art/frametest-*.gif
+
+# PyInstaller build output for the gallery app (rebuild with app/gallery/build.ps1)
+app/gallery/dist/
+app/gallery/build/
+app/gallery/*.spec
