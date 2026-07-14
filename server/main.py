@@ -108,9 +108,19 @@ async def push_canvas_locked():
     """Push the current canvas to the panel. Caller must hold dev_lock."""
     path = TMP / "canvas.png"
     canvas.save_png(path)
+    leaving_gif = state["display_mode"] == "gif"
     await IdmImage().setMode(1)
+    if leaving_gif:
+        # leaving GIF playback: the mode switch blanks the screen but the
+        # panel drops image data sent immediately after — settle, then send
+        # twice (observed: gif -> instant image push renders black)
+        await asyncio.sleep(0.5)
     await IdmImage().uploadProcessed(str(path), pixel_size=canvas.size)
+    if leaving_gif:
+        await asyncio.sleep(0.3)
+        await IdmImage().uploadProcessed(str(path), pixel_size=canvas.size)
     state["display_mode"] = "canvas"
+    state["now_playing"] = None
     state["needs_push"] = False
     state["last_push"] = time.time()
 
