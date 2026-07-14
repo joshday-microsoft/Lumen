@@ -540,6 +540,13 @@ async def paint_runner(steps, delay: float, clear: bool, label: str):
             if delay:
                 await asyncio.sleep(delay)
         log.info("%s complete: %d pixels", label, total)
+        # snapshot the finished picture — tmp/canvas.png otherwise still holds
+        # the pre-paint clear frame (paintings never push), so archived stills
+        # copied from it would be black
+        try:
+            canvas.save_png(TMP / "canvas.png")
+        except Exception:
+            pass
     finally:
         spiral_state["running"] = False
 
