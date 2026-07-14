@@ -179,9 +179,12 @@ class App:
         body = tk.Frame(self.root, bg=BG)
         body.pack(fill="both", expand=True, padx=16, pady=(0, 14))
 
-        # --- gallery (scrollable) ---
-        gal = tk.Frame(body, bg=PANEL, highlightthickness=1, highlightbackground="#20293a")
-        gal.pack(side="left", fill="both", expand=True)
+        # --- left column: gallery (scrollable) + send-text bar ---
+        left = tk.Frame(body, bg=BG)
+        left.pack(side="left", fill="both", expand=True)
+
+        gal = tk.Frame(left, bg=PANEL, highlightthickness=1, highlightbackground="#20293a")
+        gal.pack(side="top", fill="both", expand=True)
         self.canvas = tk.Canvas(gal, bg=PANEL, highlightthickness=0)
         vs = tk.Scrollbar(gal, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=vs.set)
@@ -192,6 +195,48 @@ class App:
         self.grid.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(self._grid_win, width=e.width))
         self.canvas.bind_all("<MouseWheel>", self._on_wheel)
+
+        # --- send text to wall (with styling) ---
+        tp = tk.Frame(left, bg=PANEL, highlightthickness=1, highlightbackground="#20293a")
+        tp.pack(side="bottom", fill="x", pady=(10, 0))
+        tk.Label(tp, text="SEND TEXT", font=self.f_small, fg=MUTED, bg=PANEL).pack(anchor="w", padx=10, pady=(8, 2))
+        erow = tk.Frame(tp, bg=PANEL)
+        erow.pack(fill="x", padx=10)
+        self.text_entry = tk.Entry(erow, font=self.f, bg=CARD, fg=TEXT, relief="flat",
+                                   insertbackground=TEXT, highlightthickness=1,
+                                   highlightbackground="#22304a", highlightcolor=ACCENT)
+        self.text_entry.pack(side="left", fill="x", expand=True, ipady=5)
+        self.text_entry.bind("<Return>", lambda e: self._send_text())
+        tk.Button(erow, text="Send Text", font=self.f, fg="#062033", bg=ACCENT,
+                  activebackground="#79cbff", activeforeground="#062033", relief="flat",
+                  bd=0, cursor="hand2", command=self._send_text
+                  ).pack(side="left", padx=(8, 0), ipady=4, ipadx=8)
+
+        crow = tk.Frame(tp, bg=PANEL)
+        crow.pack(fill="x", padx=10, pady=(6, 10))
+        self.text_color = "#4db8ff"
+        self.color_btn = tk.Button(crow, text="  ", bg=self.text_color, relief="flat", bd=0,
+                                   cursor="hand2", width=3, command=self._pick_text_color)
+        self.color_btn.pack(side="left")
+        self.rainbow_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(crow, text="Rainbow", variable=self.rainbow_var, font=self.f_small,
+                       fg=TEXT, bg=PANEL, activebackground=PANEL, activeforeground=TEXT,
+                       selectcolor=CARD, cursor="hand2").pack(side="left", padx=(10, 0))
+        self.text_mode = tk.StringVar(value="Marquee")
+        om = tk.OptionMenu(crow, self.text_mode, "Marquee", "Static", "Blink",
+                           "Fade", "Tetris", "Filling")
+        om.configure(font=self.f_small, fg=TEXT, bg=CARD, activebackground=CARD_HI,
+                     activeforeground=TEXT, relief="flat", bd=0, highlightthickness=0,
+                     cursor="hand2", indicatoron=False, padx=10, pady=3)
+        om["menu"].configure(font=self.f_small, fg=TEXT, bg=CARD,
+                             activebackground=ACCENT, activeforeground="#062033")
+        om.pack(side="left", padx=(10, 0))
+        tk.Label(crow, text="speed", font=self.f_small, fg=MUTED, bg=PANEL).pack(side="left", padx=(12, 4))
+        self.text_speed = tk.Scale(crow, from_=40, to=100, orient="horizontal", showvalue=False,
+                                   bg=PANEL, troughcolor="#1b2333", highlightthickness=0,
+                                   activebackground=ACCENT, bd=0, length=90)
+        self.text_speed.set(95)
+        self.text_speed.pack(side="left")
 
         # --- sidebar ---
         side = tk.Frame(body, bg=BG, width=232)
@@ -371,6 +416,43 @@ class App:
                 self.q.put(("sent", (path.stem, False, msg)))
             except Exception as e:
                 self.q.put(("sent", (path.stem, False, str(e)[:160])))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    TEXT_MODES = {"Marquee": 1, "Static": 0, "Blink": 5, "Fade": 6, "Tetris": 7, "Filling": 8}
+
+    def _pick_text_color(self):
+        from tkinter import colorchooser
+        rgb, hexval = colorchooser.askcolor(initialcolor=self.text_color, parent=self.root,
+                                            title="Text color")
+        if hexval:
+            self.text_color = hexval
+            self.color_btn.configure(bg=hexval)
+
+    def _send_text(self):
+        msg = self.text_entry.get().strip()
+        if not msg:
+            self._set_toast("type a message first", MUTED)
+            return
+        payload = {"text": msg, "color": self.text_color,
+                   "speed": int(self.text_speed.get()),
+                   "mode": self.TEXT_MODES.get(self.text_mode.get(), 1),
+                   "rainbow": bool(self.rainbow_var.get())}
+        self._set_toast(f"sending text to the wall…", ACCENT)
+
+        def work():
+            try:
+                http_json("POST", "/paint/stop")       # free the wall from any show
+                time.sleep(0.35)
+            except Exception:
+                pass
+            try:
+                http_json("POST", "/text", payload, timeout=30)
+                self.q.put(("toast", (f"✓ text on the wall ({self.text_mode.get().lower()})", GREEN)))
+            except urllib.error.HTTPError as e:
+                self.q.put(("toast", (f"✗ text: {e.read().decode()[:100]}", DANGER)))
+            except Exception as e:
+                self.q.put(("toast", (f"✗ text: {str(e)[:100]}", DANGER)))
 
         threading.Thread(target=work, daemon=True).start()
 
