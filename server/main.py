@@ -371,8 +371,8 @@ async def send_gif_flow_controlled(gif_bytes: bytes):
 
 @app.post("/gif")
 async def gif(body: dict = Body(...)):
-    path = body.get("path")
-    if not path or not Path(path).exists():
+    path = resolve_art(body.get("path") or "")
+    if not body.get("path") or not Path(path).exists():
         raise HTTPException(400, f"gif path not found: {path}")
 
     # panel-native GIFs go up verbatim; anything else gets resized first.
@@ -963,7 +963,7 @@ async def paint(body: dict = Body(...)):
     The stroke ORDER is the performance."""
     if _painter_busy():
         raise HTTPException(409, "a painting is already in progress — POST /paint/stop first")
-    src = body.get("path")
+    src = resolve_art(body.get("path")) if body.get("path") else None
     raw = body.get("pixels")
     if src:
         if not Path(src).exists():
@@ -1063,3 +1063,51 @@ tick(); setInterval(tick, 1000);
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return PREVIEW_HTML
+
+
+# ---------- gallery web app (served UI — the desktop shell loads this) ----------
+
+ART_DIR = ROOT / "art"
+ART_IGNORE = ("strip", "preview", "frametest", "-1x", "icon", "mark-")
+
+
+def resolve_art(path: str) -> str:
+    """Bare filenames resolve against art/ so web clients needn't know disk paths."""
+    p = Path(path)
+    return str(p if p.is_absolute() else ART_DIR / path)
+
+
+@app.get("/art")
+async def art_list():
+    """Sendable art pieces, newest first."""
+    items = []
+    if ART_DIR.exists():
+        for p in list(ART_DIR.glob("*.png")) + list(ART_DIR.glob("*.gif")):
+            stem = p.stem.lower()
+            if stem == "koi-big" or any(s in stem for s in ART_IGNORE):
+                continue
+            items.append({
+                "name": p.stem,
+                "file": p.name,
+                "medium": "loop" if p.suffix.lower() == ".gif" else "still",
+                "mtime": p.stat().st_mtime,
+            })
+    items.sort(key=lambda i: i["mtime"], reverse=True)
+    return {"items": items}
+
+
+@app.get("/art/file/{filename}")
+async def art_file(filename: str):
+    from fastapi.responses import FileResponse
+    p = (ART_DIR / filename).resolve()
+    if p.parent != ART_DIR.resolve() or not p.exists() or p.suffix.lower() not in (".png", ".gif"):
+        raise HTTPException(404, "no such art file")
+    return FileResponse(p)
+
+
+@app.get("/app", response_class=HTMLResponse)
+async def gallery_app():
+    page = ROOT / "server" / "app.html"
+    if not page.exists():
+        raise HTTPException(404, "app.html missing")
+    return page.read_text(encoding="utf-8")

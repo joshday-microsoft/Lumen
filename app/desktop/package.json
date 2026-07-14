@@ -1,0 +1,13 @@
+{
+  "name": "lumen-gallery",
+  "version": "2.0.0",
+  "description": "Lumen Gallery desktop shell — loads the daemon-served web UI",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

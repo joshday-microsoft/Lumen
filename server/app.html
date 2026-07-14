@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumen</title>
+<style>
+  :root{
+    --canvas:#05080F; --panel:#0B111E; --panel2:#111A2B; --ink:#F2F5F9;
+    --muted:#8A94A6; --dim:#5C6678; --accent:#2E7BE8; --accent-b:#63A4F4;
+    --accent-deep:#1D4ED8; --line:rgba(148,163,184,.14); --danger:#E5484D;
+    --ok:#3DD68C;
+  }
+  *{box-sizing:border-box; margin:0}
+  html,body{height:100%}
+  body{
+    background:var(--canvas); color:var(--ink);
+    font:14px/1.5 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    overflow:hidden;
+  }
+  .mono{font-family:"Cascadia Code",Consolas,ui-monospace,monospace}
+  .eyebrow{font-family:"Cascadia Code",Consolas,ui-monospace,monospace;
+    font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--dim)}
+
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 22px; border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex; align-items:baseline; gap:10px}
+  .brand .mark{width:12px; height:12px; background:var(--accent); display:inline-block;
+    border-radius:2px; transform:translateY(1px)}
+  .brand h1{font-size:17px; font-weight:600; letter-spacing:.01em}
+  .brand .sub{color:var(--dim); font-size:17px; font-weight:600}
+  .status{display:flex; align-items:center; gap:8px}
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--danger); transition:background .3s}
+  .dot.ok{background:var(--ok)} .dot.warn{background:#E0A52E}
+  #statusText{font-size:11px}
+
+  main{display:grid; grid-template-columns:1fr 292px; height:calc(100vh - 61px)}
+
+  /* ---- gallery ---- */
+  #galleryWrap{overflow-y:auto; padding:18px 18px 90px 22px}
+  #gallery{display:grid; grid-template-columns:repeat(auto-fill,minmax(148px,1fr)); gap:14px}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:10px; cursor:pointer; transition:background .15s, border-color .15s, transform .15s;
+  }
+  .card:hover{background:var(--panel2); transform:translateY(-1px)}
+  .card.sel{border-color:var(--accent); background:var(--panel2)}
+  .card img{width:100%; aspect-ratio:1; image-rendering:pixelated; border-radius:6px;
+    background:#000; display:block}
+  .card .meta{display:flex; align-items:center; justify-content:space-between; margin-top:8px}
+  .card .name{font-size:12.5px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .chip{font-family:Consolas,ui-monospace,monospace; font-size:9px; letter-spacing:.14em;
+    padding:2px 6px; border-radius:99px; border:1px solid var(--line); color:var(--dim)}
+  .chip.loop{color:var(--accent-b); border-color:rgba(99,164,244,.35)}
+
+  /* ---- send text bar (floats over gallery bottom) ---- */
+  #textBar{
+    position:fixed; left:0; bottom:0; width:calc(100% - 292px);
+    padding:12px 18px 14px 22px; background:linear-gradient(transparent, var(--canvas) 26%);
+  }
+  .textInner{background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:10px 12px; display:flex; flex-wrap:wrap; gap:10px; align-items:center}
+  #msg{flex:1 1 220px; background:var(--panel2); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:8px 12px; font:inherit; outline:none}
+  #msg:focus{border-color:var(--accent)}
+  input[type=color]{width:34px; height:34px; border:1px solid var(--line); border-radius:8px;
+    background:var(--panel2); padding:3px; cursor:pointer}
+  select{background:var(--panel2); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px; font:inherit; font-size:12.5px; outline:none; cursor:pointer}
+  .check{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); cursor:pointer}
+  .check input{accent-color:var(--accent); cursor:pointer}
+  #speed{accent-color:var(--accent); width:86px}
+
+  /* ---- rail ---- */
+  aside{border-left:1px solid var(--line); padding:18px 20px; overflow-y:auto;
+    display:flex; flex-direction:column; gap:14px}
+  .tile{width:232px; height:232px; image-rendering:pixelated; border-radius:10px;
+    border:1px solid var(--line); background:#000; display:block}
+  .tileWrap{position:relative}
+  .tileTag{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:var(--dim); font-size:12px; pointer-events:none}
+  .btn{
+    display:block; width:100%; border:0; border-radius:9px; padding:11px 0;
+    font:600 13.5px/1 "Segoe UI",system-ui,sans-serif; cursor:pointer;
+    transition:background .15s, color .15s;
+  }
+  .btn.primary{background:var(--accent); color:#fff}
+  .btn.primary:hover{background:var(--accent-deep)}
+  .btn.primary:disabled{background:var(--panel2); color:var(--dim); cursor:default}
+  .btn.ghost{background:transparent; color:var(--ink); border:1px solid var(--line); font-weight:500}
+  .btn.ghost:hover{background:var(--panel2); border-color:rgba(148,163,184,.3)}
+  .btn.ghost:disabled{color:var(--dim); cursor:default; background:transparent}
+  .btn.danger{background:transparent; color:#f1a9a4; border:1px solid rgba(229,72,77,.35); font-weight:500}
+  .btn.danger:hover{background:rgba(229,72,77,.12)}
+  .games{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .rangeRow{display:flex; align-items:center; justify-content:space-between; gap:10px}
+  .rangeRow input{flex:1; accent-color:var(--accent)}
+  .duo{display:flex; gap:8px}
+  #toast{font-size:12px; color:var(--muted); min-height:34px; line-height:1.4}
+  #toast.ok{color:var(--ok)} #toast.err{color:#f1a9a4} #toast.info{color:var(--accent-b)}
+  hr{border:0; border-top:1px solid var(--line)}
+  #selName{font-size:13px; font-weight:600; color:var(--ink); margin:2px 0 6px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-height:20px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="mark"></span><h1>LUMEN</h1><span class="sub">Gallery</span></div>
+  <div class="status"><span id="dot" class="dot"></span><span id="statusText" class="mono eyebrow" style="letter-spacing:.14em">connecting…</span></div>
+</header>
+
+<main>
+  <div id="galleryWrap"><div id="gallery"></div></div>
+
+  <aside>
+    <div>
+      <div class="eyebrow">On the wall now</div>
+      <div class="tileWrap" style="margin-top:8px">
+        <img id="wall" class="tile" alt="">
+        <div id="wallTag" class="tileTag" hidden></div>
+      </div>
+    </div>
+    <hr>
+    <div>
+      <div class="eyebrow">Selected</div>
+      <div id="selName">— pick a piece —</div>
+      <img id="selImg" class="tile" alt="">
+    </div>
+    <button id="sendBtn" class="btn primary" disabled onclick="sendSelected()">Send to Wall</button>
+    <button id="paintBtn" class="btn ghost" disabled onclick="paintSelected()">🖌&nbsp; Paint it, stroke by stroke</button>
+    <hr>
+    <div>
+      <div class="eyebrow" style="margin-bottom:8px">Play a show</div>
+      <div class="games">
+        <button class="btn ghost" onclick="startGame('/pacman','Pac-Man')">Pac-Man</button>
+        <button class="btn ghost" onclick="startGame('/snake','Snake')">Snake</button>
+        <button class="btn ghost" onclick="startGame('/galaga','Galaga')">Galaga</button>
+        <button class="btn ghost" onclick="startGame('/life','Life')">Life</button>
+      </div>
+      <button class="btn danger" style="margin-top:8px" onclick="stopShow()">■&nbsp; Stop show</button>
+    </div>
+    <hr>
+    <div>
+      <div class="rangeRow"><span class="eyebrow">Brightness</span><span id="brVal" class="eyebrow"></span></div>
+      <div class="rangeRow" style="margin-top:6px">
+        <input id="bright" type="range" min="5" max="100" value="80"
+               oninput="brVal.textContent=this.value+'%'" onchange="setBright(this.value)">
+      </div>
+      <div class="duo" style="margin-top:10px">
+        <button class="btn ghost" onclick="screenOn(true)">Screen on</button>
+        <button class="btn ghost" onclick="screenOn(false)">Off</button>
+      </div>
+    </div>
+    <div id="toast"></div>
+  </aside>
+</main>
+
+<div id="textBar">
+  <div class="textInner">
+    <span class="eyebrow" style="flex:0 0 auto">Send text</span>
+    <input id="msg" placeholder="Message for the wall…" onkeydown="if(event.key==='Enter')sendText()">
+    <input id="txtColor" type="color" value="#63A4F4" title="text color">
+    <label class="check"><input id="rainbow" type="checkbox">rainbow</label>
+    <select id="txtMode">
+      <option value="1">Marquee</option><option value="0">Static</option>
+      <option value="5">Blink</option><option value="6">Fade</option>
+      <option value="7">Tetris</option><option value="8">Filling</option>
+    </select>
+    <span class="eyebrow">speed</span>
+    <input id="speed" type="range" min="40" max="100" value="95">
+    <button class="btn primary" style="width:auto; padding:9px 18px" onclick="sendText()">Send</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let selected = null;          // {name, file, medium}
+let wallSrc = null;           // dedupe mirror updates
+let artCache = "";
+
+async function api(method, path, body){
+  const r = await fetch(path, {method, headers:{'content-type':'application/json'},
+                               body: body===undefined?undefined:JSON.stringify(body)});
+  if(!r.ok){ let d=""; try{ d=(await r.json()).detail||"" }catch(e){} throw new Error(d||r.status); }
+  return r.json().catch(()=> ({}));
+}
+function toast(text, cls){ const t=$('toast'); t.textContent=text; t.className=cls||""; }
+
+/* ---------- gallery ---------- */
+async function loadArt(){
+  const data = await api('GET','/art');
+  const key = JSON.stringify(data.items.map(i=>i.file));
+  if(key===artCache) return;
+  artCache = key;
+  const g = $('gallery'); g.innerHTML = "";
+  for(const it of data.items){
+    const card = document.createElement('div');
+    card.className = 'card'; card.dataset.file = it.file;
+    card.innerHTML = `<img loading="lazy" src="/art/file/${it.file}" alt="${it.name}">
+      <div class="meta"><span class="name">${it.name}</span>
+      <span class="chip ${it.medium==='loop'?'loop':''}">${it.medium.toUpperCase()}</span></div>`;
+    card.onclick = () => select(it, card);
+    card.ondblclick = () => { select(it, card); sendSelected(); };
+    g.appendChild(card);
+  }
+}
+function select(it, card){
+  document.querySelectorAll('.card.sel').forEach(c=>c.classList.remove('sel'));
+  card.classList.add('sel');
+  selected = it;
+  $('selName').textContent = it.name;
+  $('selImg').src = '/art/file/'+it.file;      // GIFs animate right here
+  $('sendBtn').disabled = false;
+  $('paintBtn').disabled = it.medium!=='still';
+}
+
+/* ---------- actions ---------- */
+async function stopFirst(){ try{ await api('POST','/paint/stop'); await new Promise(r=>setTimeout(r,350)); }catch(e){} }
+
+async function sendSelected(){
+  if(!selected) return;
+  $('sendBtn').disabled = true; toast(`Sending ${selected.name}…`,'info');
+  try{
+    await stopFirst();
+    await api('POST', selected.medium==='loop'?'/gif':'/image',
+              {path: artPath(selected.file)});
+    toast(`✓ ${selected.name} is on the wall`,'ok');
+  }catch(e){ toast('✗ '+e.message,'err'); }
+  $('sendBtn').disabled = false;
+}
+async function paintSelected(){
+  if(!selected || selected.medium!=='still') return;
+  toast(`🖌 painting ${selected.name} live…`,'info');
+  try{
+    await stopFirst();
+    const r = await api('POST','/paint',{path: artPath(selected.file), delay:0.015});
+    toast(`🖌 painting ${selected.name} — watch the wall (~${Math.round(r.eta_s)}s)`,'ok');
+  }catch(e){ toast('✗ '+e.message,'err'); }
+}
+async function startGame(ep, label){
+  toast(`Starting ${label}…`,'info');
+  try{
+    await stopFirst();
+    for(let i=0;i<8;i++){
+      try{ await api('POST',ep,{}); toast(`▶ ${label} playing on the wall`,'ok'); return; }
+      catch(e){ if(String(e.message).includes('progress')){ await new Promise(r=>setTimeout(r,350)); continue; } throw e; }
+    }
+    toast('✗ wall still busy','err');
+  }catch(e){ toast('✗ '+e.message,'err'); }
+}
+async function stopShow(){
+  try{
+    await api('POST','/paint/stop'); await new Promise(r=>setTimeout(r,300));
+    await api('POST','/image',{path: artPath('daylabs-mark-32.png')}).catch(()=>{});
+    toast('✓ stopped — back to Day Labs','ok');
+  }catch(e){ toast('✗ '+e.message,'err'); }
+}
+async function sendText(){
+  const msg = $('msg').value.trim();
+  if(!msg){ toast('type a message first'); return; }
+  toast('sending text…','info');
+  try{
+    await stopFirst();
+    await api('POST','/text',{ text:msg, color:$('txtColor').value,
+      speed:+$('speed').value, mode:+$('txtMode').value, rainbow:$('rainbow').checked });
+    toast('✓ text is scrolling on the wall','ok');
+  }catch(e){ toast('✗ '+e.message,'err'); }
+}
+async function setBright(v){ try{ await api('POST','/brightness',{percent:+v}); toast(`✓ brightness ${v}%`,'ok'); }catch(e){ toast('✗ '+e.message,'err'); } }
+async function screenOn(on){ try{ await api('POST','/screen',{on}); toast(on?'✓ screen on':'✓ screen off','ok'); }catch(e){ toast('✗ '+e.message,'err'); } }
+
+function artPath(file){ return file; }   // daemon resolves bare names against art/
+
+/* ---------- status + mirror ---------- */
+function setWall(src, tag){
+  if(wallSrc===src+"|"+tag) return;
+  wallSrc = src+"|"+tag;
+  const w=$('wall'), t=$('wallTag');
+  if(src){ w.src=src; t.hidden=true; } else { w.removeAttribute('src'); t.hidden=false; t.textContent=tag; }
+}
+async function poll(){
+  try{
+    const s = await api('GET','/status');
+    $('dot').className = 'dot ' + (s.connected?'ok':'warn');
+    $('statusText').textContent = s.connected ? `connected · ${s.display_mode}` : 'searching for panel…';
+    const mode = s.display_mode;
+    if(mode==='gif'){
+      const np = s.now_playing||{};
+      if(np.path){
+        const file = np.path.split(/[\\/]/).pop();
+        setWall('/art/file/'+file, '');             // the real loop, animating
+      } else setWall(null,'loop playing');
+    } else if(['text','clock','color','off'].includes(mode)){
+      setWall(null, mode==='off'?'screen off':mode);
+    } else {
+      setWall('/canvas.png?scale=4&t='+Date.now(),''); // live canvas (games/painting)
+      wallSrc = null;                                  // force refresh next tick
+    }
+  }catch(e){
+    $('dot').className='dot';
+    $('statusText').textContent='daemon offline';
+  }
+}
+async function boot(){
+  await loadArt(); await poll();
+  setInterval(poll, 1500);
+  setInterval(loadArt, 15000);
+}
+boot();
+</script>
+</body>
+</html>
