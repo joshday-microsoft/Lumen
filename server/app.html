@@ -191,14 +191,14 @@ function toast(text, cls){ const t=$('toast'); t.textContent=text; t.className=c
 /* ---------- gallery ---------- */
 async function loadArt(){
   const data = await api('GET','/art');
-  const key = JSON.stringify(data.items.map(i=>i.file));
+  const key = JSON.stringify(data.items.map(i=>i.file+':'+i.mtime));   // content changes rebuild too
   if(key===artCache) return;
   artCache = key;
   const g = $('gallery'); g.innerHTML = "";
   for(const it of data.items){
     const card = document.createElement('div');
     card.className = 'card'; card.dataset.file = it.file;
-    card.innerHTML = `<img loading="lazy" src="/art/file/${it.file}" alt="${it.name}">
+    card.innerHTML = `<img loading="lazy" src="/art/file/${it.file}?v=${it.mtime}" alt="${it.name}">
       <div class="meta"><span class="name">${it.name}</span>
       <span class="chip ${it.medium==='loop'?'loop':''}">${it.medium.toUpperCase()}</span></div>`;
     card.onclick = () => select(it, card);
@@ -211,7 +211,7 @@ function select(it, card){
   card.classList.add('sel');
   selected = it;
   $('selName').textContent = it.name;
-  $('selImg').src = '/art/file/'+it.file;      // GIFs animate right here
+  $('selImg').src = '/art/file/'+it.file+'?v='+it.mtime;   // GIFs animate right here
   $('sendBtn').disabled = false;
   $('paintBtn').disabled = it.medium!=='still';
 }
