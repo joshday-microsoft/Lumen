@@ -219,7 +219,14 @@ class App:
                                   bg=ACCENT, activebackground="#79cbff", activeforeground="#062033",
                                   relief="flat", bd=0, cursor="hand2", state="disabled",
                                   command=self._send_selected)
-        self.send_btn.pack(fill="x", ipady=7, pady=(0, 12))
+        self.send_btn.pack(fill="x", ipady=7, pady=(0, 6))
+
+        # live-paint a still, stroke by stroke (the wall's party trick)
+        self.paint_btn = tk.Button(side, text="🖌  Paint to Wall", font=self.f, fg="#dff0d8",
+                                   bg="#1d3a29", activebackground=GREEN, activeforeground="#04150b",
+                                   relief="flat", bd=0, cursor="hand2", state="disabled",
+                                   command=self._paint_selected)
+        self.paint_btn.pack(fill="x", ipady=5, pady=(0, 12))
 
         # games / self-playing shows
         tk.Label(side, text="PLAY A SHOW", font=self.f_small, fg=MUTED, bg=BG).pack(anchor="w", pady=(0, 3))
@@ -331,6 +338,8 @@ class App:
         except Exception:
             pass
         self.send_btn.configure(state="normal")
+        # painting replays stills stroke-by-stroke; loops play device-side
+        self.paint_btn.configure(state="normal" if medium == "STILL" else "disabled")
 
     def _on_wheel(self, e):
         self.canvas.yview_scroll(int(-e.delta / 120), "units")
@@ -362,6 +371,39 @@ class App:
                 self.q.put(("sent", (path.stem, False, msg)))
             except Exception as e:
                 self.q.put(("sent", (path.stem, False, str(e)[:160])))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _paint_selected(self):
+        if not self.selected:
+            return
+        path, medium = self.selected
+        if medium != "STILL":
+            return
+        self._set_toast(f"🖌 painting {path.stem} live on the wall…", ACCENT)
+
+        def work():
+            try:
+                http_json("POST", "/paint/stop")
+                time.sleep(0.35)
+            except Exception:
+                pass
+            for _ in range(8):
+                try:
+                    r = http_json("POST", "/paint", {"path": str(path), "delay": 0.015})
+                    eta = int(r.get("eta_s", 0))
+                    self.q.put(("toast", (f"🖌 painting {path.stem} — watch the wall (~{eta}s)", GREEN)))
+                    return
+                except urllib.error.HTTPError as e:
+                    if e.code == 409:
+                        time.sleep(0.35)
+                        continue
+                    self.q.put(("toast", (f"✗ paint: {e.read().decode()[:100]}", DANGER)))
+                    return
+                except Exception as e:
+                    self.q.put(("toast", (f"✗ paint: {str(e)[:100]}", DANGER)))
+                    return
+            self.q.put(("toast", ("✗ paint: wall still busy", DANGER)))
 
         threading.Thread(target=work, daemon=True).start()
 

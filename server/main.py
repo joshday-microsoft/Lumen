@@ -936,25 +936,52 @@ async def spiral(body: dict = Body(default={})):
     return {"started": True, "delay": delay, "total": len(steps), "eta_min": round(len(steps) * delay / 60, 1)}
 
 
+def strokes_from_still(path: str, size: int):
+    """Auto-choreograph a still image into a painterly stroke order:
+    largest color regions first (background washes), then progressively
+    smaller ones (subject, then details), serpentine within each region."""
+    from PIL import Image as PilImage
+    im = PilImage.open(path).convert("RGB")
+    if im.size != (size, size):
+        im = im.resize((size, size), PilImage.NEAREST)
+    regions = {}
+    for y in range(size):
+        for x in range(size):
+            regions.setdefault(im.getpixel((x, y)), []).append((x, y))
+    steps = []
+    for color, px in sorted(regions.items(), key=lambda kv: -len(kv[1])):
+        px.sort(key=lambda p: (p[1], p[0] if p[1] % 2 == 0 else size - p[0]))
+        steps.extend((x, y, color) for x, y in px)
+    return steps
+
+
 @app.post("/paint")
 async def paint(body: dict = Body(...)):
-    """Live-paint an ordered pixel sequence: {pixels: [[x, y, color], ...],
-    delay?: seconds between strokes, clear?: start from black (default true)}.
+    """Live-paint: {pixels: [[x, y, color], ...]} for explicit choreography,
+    OR {path: <still image>} to auto-choreograph it (washes -> details).
+    delay?: seconds between strokes; clear?: start from black (default true).
     The stroke ORDER is the performance."""
     if _painter_busy():
         raise HTTPException(409, "a painting is already in progress — POST /paint/stop first")
+    src = body.get("path")
     raw = body.get("pixels")
-    if not isinstance(raw, list) or not raw:
-        raise HTTPException(400, "pixels must be a non-empty list of [x, y, color]")
-    steps = []
-    try:
-        for p in raw:
-            x, y, c = int(p[0]), int(p[1]), parse_color(p[2])
-            if not (0 <= x < canvas.size and 0 <= y < canvas.size):
-                raise ValueError(f"pixel out of bounds: {x},{y}")
-            steps.append((x, y, c))
-    except (ValueError, TypeError, IndexError, CanvasError) as e:
-        raise HTTPException(400, f"bad pixel entry: {e}")
+    if src:
+        if not Path(src).exists():
+            raise HTTPException(400, f"paint path not found: {src}")
+        steps = strokes_from_still(str(src), canvas.size)
+        state["now_playing"] = {"kind": "painting", "path": str(src), "name": Path(src).stem}
+    elif isinstance(raw, list) and raw:
+        steps = []
+        try:
+            for p in raw:
+                x, y, c = int(p[0]), int(p[1]), parse_color(p[2])
+                if not (0 <= x < canvas.size and 0 <= y < canvas.size):
+                    raise ValueError(f"pixel out of bounds: {x},{y}")
+                steps.append((x, y, c))
+        except (ValueError, TypeError, IndexError, CanvasError) as e:
+            raise HTTPException(400, f"bad pixel entry: {e}")
+    else:
+        raise HTTPException(400, "provide pixels: [[x, y, color], ...] or path: <still image>")
     delay = max(0.0, float(body.get("delay", 0.02)))
     spiral_state["task"] = asyncio.create_task(
         paint_runner(steps, delay, clear=bool(body.get("clear", True)), label="paint")
