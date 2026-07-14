@@ -134,8 +134,8 @@ class App:
 
         root.title("Lumen Gallery")
         root.configure(bg=BG)
-        root.geometry("760x628")
-        root.minsize(680, 520)
+        root.geometry("760x716")
+        root.minsize(680, 640)
         try:
             root.iconbitmap(default=str(ICON))
         except Exception:
@@ -146,6 +146,11 @@ class App:
         self.f = tkfont.Font(family="Segoe UI", size=9)
         self.f_small = tkfont.Font(family="Segoe UI", size=8)
         self.f_btn = tkfont.Font(family="Segoe UI Semibold", size=11)
+
+        # imageless tk.Labels treat width/height as CHARACTERS/LINES, which
+        # blows the placeholder tiles up and pushes the sidebar off-window —
+        # give both tiles a real black image so dimensions stay pixels
+        self._blank = ImageTk.PhotoImage(Image.new("RGB", (WALL_PX, WALL_PX), (0, 0, 0)))
 
         self._build_header()
         self._build_body()
@@ -194,7 +199,9 @@ class App:
         side.pack_propagate(False)
 
         tk.Label(side, text="ON THE WALL NOW", font=self.f_small, fg=MUTED, bg=BG).pack(anchor="w")
-        self.wall_lbl = tk.Label(side, bg="#000000", width=WALL_PX, height=WALL_PX,
+        self.wall_lbl = tk.Label(side, image=self._blank, compound="center", text="",
+                                 fg=MUTED, font=self.f_small, bg="#000000",
+                                 width=WALL_PX, height=WALL_PX,
                                  highlightthickness=1, highlightbackground="#22304a")
         self.wall_lbl.pack(pady=(4, 14))
 
@@ -203,7 +210,8 @@ class App:
         tk.Label(side, text="SELECTED", font=self.f_small, fg=MUTED, bg=BG).pack(anchor="w")
         self.sel_name = tk.Label(side, text="— pick a piece —", font=self.f_h, fg=TEXT, bg=BG)
         self.sel_name.pack(anchor="w", pady=(1, 4))
-        self.sel_lbl = tk.Label(side, bg="#000000", width=WALL_PX, height=WALL_PX,
+        self.sel_lbl = tk.Label(side, image=self._blank, compound="center", text="",
+                                bg="#000000", width=WALL_PX, height=WALL_PX,
                                 highlightthickness=1, highlightbackground="#22304a")
         self.sel_lbl.pack(pady=(0, 12))
 
@@ -519,8 +527,8 @@ class App:
         key = f"mode:{label}"
         if self._wall_src == key:
             return
-        self.wall_lbl.configure(image="", text=label, fg=MUTED, bg="#000000",
-                                font=self.f_small, width=16, height=8)
+        self.wall_lbl.configure(image=self._blank, text=label, fg=MUTED,
+                                width=WALL_PX, height=WALL_PX)
         self._wall_src = key
 
 
