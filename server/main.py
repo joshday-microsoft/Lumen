@@ -313,8 +313,11 @@ async def notify(body: dict = Body(...)):
 
 @app.post("/image")
 async def image(body: dict = Body(...)):
+    op = {k: v for k, v in body.items() if k in ("path", "b64", "x", "y", "w", "h")}
+    if op.get("path"):
+        op["path"] = resolve_art(op["path"])   # bare filenames live in art/
     try:
-        canvas.apply_ops([{"op": "image", **{k: v for k, v in body.items() if k in ("path", "b64", "x", "y", "w", "h")}}])
+        canvas.apply_ops([{"op": "image", **op}])
     except CanvasError as e:
         raise HTTPException(400, str(e))
     pushed = False
