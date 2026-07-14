@@ -81,6 +81,7 @@ state = {
     "needs_push": False,
     "last_push": None,
     "scanning": False,
+    "now_playing": None,   # {"kind","path","name"} when a GIF is on the wall — lets clients mirror it
 }
 
 
@@ -216,6 +217,7 @@ async def status():
         "last_push": state["last_push"],
         "last_error": state["last_error"],
         "scanning": state["scanning"],
+        "now_playing": state["now_playing"],
         "spiral": {k: spiral_state[k] for k in ("running", "index", "total", "delay")},
     }
 
@@ -409,6 +411,7 @@ async def gif(body: dict = Body(...)):
 
     await device_call(_send, mode="gif")
     state["needs_push"] = True
+    state["now_playing"] = {"kind": "gif", "path": str(path), "name": Path(path).stem}
     return {"ok": True, "mode": "gif"}
 
 

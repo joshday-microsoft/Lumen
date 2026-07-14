@@ -128,6 +128,7 @@ class App:
         self.cards = {}                 # path -> card frame
         self._thumb_refs = []           # keep PhotoImage refs alive
         self._wall_img = None
+        self._wall_src = None           # what the mirror currently shows (dedupe)
         self._sel_img = None
         self.sending = False
 
@@ -428,8 +429,15 @@ class App:
             try:
                 s = http_json("GET", "/status", timeout=4)
                 self.q.put(("status", s))
-                if s.get("display_mode") in ("canvas", "graffiti", "life", "snake",
-                                             "galaga", "pacman", None):
+                mode = s.get("display_mode")
+                if mode == "gif":
+                    # the canvas doesn't mirror device-side GIFs — render the
+                    # actual file the daemon says is playing (now_playing)
+                    np = s.get("now_playing") or {}
+                    self.q.put(("wallfile", np.get("path")))
+                elif mode in ("text", "clock", "color", "off"):
+                    self.q.put(("wallmode", mode))
+                else:                                  # canvas/graffiti/games mirror live
                     try:
                         self.q.put(("wall", http_bytes("/canvas.png?scale=4", timeout=4)))
                     except Exception:
@@ -446,6 +454,10 @@ class App:
                     self._apply_status(data)
                 elif kind == "wall":
                     self._apply_wall(data)
+                elif kind == "wallfile":
+                    self._apply_wallfile(data)
+                elif kind == "wallmode":
+                    self._apply_wallmode(data)
                 elif kind == "sent":
                     stem, ok, msg = data
                     self.sending = False
@@ -481,9 +493,35 @@ class App:
                 im = im.resize((32, 32), Image.LANCZOS)
             im = im.resize((WALL_PX, WALL_PX), Image.NEAREST)
             self._wall_img = ImageTk.PhotoImage(im)
-            self.wall_lbl.configure(image=self._wall_img, width=WALL_PX, height=WALL_PX)
+            self.wall_lbl.configure(image=self._wall_img, text="",
+                                    width=WALL_PX, height=WALL_PX)
+            self._wall_src = "canvas"
         except Exception:
             pass
+
+    def _apply_wallfile(self, path):
+        """GIF mode: mirror the file the daemon says is playing (first frame)."""
+        if not path:
+            self._apply_wallmode("loop playing")
+            return
+        if self._wall_src == path:                     # already showing it
+            return
+        try:
+            self._wall_img = make_thumb(Path(path), WALL_PX)
+            self.wall_lbl.configure(image=self._wall_img, text="",
+                                    width=WALL_PX, height=WALL_PX)
+            self._wall_src = path
+        except Exception:
+            self._apply_wallmode("loop playing")
+
+    def _apply_wallmode(self, label):
+        """Modes with nothing to mirror (text/clock/color) get a labeled tile."""
+        key = f"mode:{label}"
+        if self._wall_src == key:
+            return
+        self.wall_lbl.configure(image="", text=label, fg=MUTED, bg="#000000",
+                                font=self.f_small, width=16, height=8)
+        self._wall_src = key
 
 
 def main():
