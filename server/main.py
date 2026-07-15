@@ -6,6 +6,7 @@ Run:  .venv\\Scripts\\python.exe -m uvicorn server.main:app --port 7788 --app-di
 
 import asyncio
 import colorsys
+import io
 import json
 import logging
 import time
@@ -28,6 +29,7 @@ from idotmatrix import (
 )
 
 from idotmatrix.const import UUID_READ_DATA, UUID_WRITE_DATA
+from PIL import Image as PilImage
 
 from .canvas import Canvas, CanvasError, parse_color
 from .galaga import Galaga
@@ -104,6 +106,35 @@ async def find_device() -> str | None:
         state["scanning"] = False
 
 
+async def _send_png_acked(path):
+    """Upload a still PNG to the panel with ACKED BLE writes.
+
+    The idotmatrix library's uploadProcessed fires write-without-response for
+    every chunk with no confirmation (connectionManager.send, response=False);
+    on a flaky link chunks silently drop and the panel receives a corrupt PNG
+    that it renders as a blank screen — while a single-write command like
+    FullscreenColor always survives. Writing with response=True makes each
+    chunk wait for the peripheral's ack so nothing is lost. Falls back to a
+    throttled write-without-response if the characteristic rejects acked
+    writes. Caller must hold dev_lock.
+    """
+    with PilImage.open(path) as img:
+        if img.size != (canvas.size, canvas.size):
+            img = img.resize((canvas.size, canvas.size), PilImage.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+    payload = bytearray(IdmImage()._createPayloads(bytearray(png_bytes)))
+    try:
+        await cm.send(payload, response=True)
+    except Exception as e:                       # char may be write-without-response only
+        log.warning("acked image write failed (%s); throttled fallback", e)
+        ch = cm.client.services.get_characteristic(UUID_WRITE_DATA).max_write_without_response_size
+        for i in range(0, len(payload), ch):
+            await cm.client.write_gatt_char(UUID_WRITE_DATA, payload[i:i + ch], response=False)
+            await asyncio.sleep(0.008)
+
+
 async def push_canvas_locked():
     """Push the current canvas to the panel. Caller must hold dev_lock."""
     path = TMP / "canvas.png"
@@ -115,10 +146,10 @@ async def push_canvas_locked():
         # panel drops image data sent immediately after — settle, then send
         # twice (observed: gif -> instant image push renders black)
         await asyncio.sleep(0.5)
-    await IdmImage().uploadProcessed(str(path), pixel_size=canvas.size)
+    await _send_png_acked(path)
     if leaving_gif:
         await asyncio.sleep(0.3)
-        await IdmImage().uploadProcessed(str(path), pixel_size=canvas.size)
+        await _send_png_acked(path)
     state["display_mode"] = "canvas"
     state["now_playing"] = None
     state["needs_push"] = False
