@@ -119,7 +119,9 @@ def bottom_sand(q):
     peak = 2.4 * math.sin(math.pi * q)
 
     def count(level):
-        w = half_width(min(27, max(16, int(round(level)))))
+        # falloff measured at the mound's outer rim (the wider row), so the
+        # cone spans the whole surface instead of collapsing to a spike
+        w = half_width(min(27, max(16, int(round(level + peak)))))
         got = set()
         for y in BOT_ROWS:
             for x in INNER[y]:
@@ -128,14 +130,16 @@ def bottom_sand(q):
                     got.add((x, y))
         return got
 
+    # sand count DECREASES as the level moves down the panel, exactly like the
+    # top bulb: keep lo on the too-much side, hi on the too-little side
     lo, hi = 15.5, 28.5
     for _ in range(24):
         mid = (lo + hi) / 2
         if len(count(mid)) >= target:
-            hi = mid
-        else:
             lo = mid
-    return count(hi)
+        else:
+            hi = mid
+    return count(lo)
 
 
 def background():
@@ -261,7 +265,25 @@ def build():
 if __name__ == "__main__":
     frames = build()
 
-    # sanity: the drained glass flipped must BE the full glass (seamless loop)
+    # sanity: the sand must actually MOVE. Eyeballing the contact strip missed
+    # a flipped bisection invariant that pinned the lower bulb full in every
+    # frame, so the piece played as an hourglass that refills itself. Check the
+    # fill fractions, not the vibe.
+    print("  frame     p   top%   bot%")
+    prev_top, prev_bot = None, None
+    for f in range(DRAIN):
+        p = 1.0 - f / (DRAIN - 1)
+        t = len(top_sand(p)) / TOP_AREA
+        b = len(bottom_sand(1.0 - p)) / BOT_AREA
+        print(f"  {f:5d} {p:5.2f} {t:6.2f} {b:6.2f}")
+        assert abs(t - p) < 0.07, f"top bulb off target at frame {f}"
+        assert abs(b - (1.0 - p)) < 0.07, f"bottom bulb off target at frame {f}"
+        if prev_top is not None:
+            assert t <= prev_top + 1e-9, f"top bulb refilled at frame {f}"
+            assert b >= prev_bot - 1e-9, f"bottom bulb drained at frame {f}"
+        prev_top, prev_bot = t, b
+
+    # the drained glass flipped must BE the full glass (seamless loop)
     a = glass_layer(0.0, 0).transpose(Image.FLIP_TOP_BOTTOM)
     b = glass_layer(1.0, 0)
     assert list(a.getdata()) == list(b.getdata()), "flip does not close the loop"
