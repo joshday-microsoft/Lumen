@@ -180,6 +180,63 @@ async def device_call(fn, *, mode: str | None = None):
             raise HTTPException(503, f"device call failed: {e}")
 
 
+# Modes that redraw the panel from their own loop — a reconnect must not fight
+# them: the games and life stream their next frame within a second or two, the
+# clock runs on the panel itself, "off" must stay off, and scrolling text has
+# its own restore timer.
+SELF_DRIVING = {"life", "snake", "galaga", "pacman", "text", "clock", "off"}
+
+
+async def restore_display():
+    """Put back whatever was on the panel when the link dropped.
+
+    The PNG upload path is NOT trusted for this. It has failed twice on this
+    unit: 2026-07-15, and again 2026-08-05, when a three-hour drop ended in a
+    reconnect that logged "canvas pushed" while the wall stayed dark — every
+    BLE write acked, nothing rendered, and the day's painting was gone until a
+    human noticed. Graffiti per-pixel writes are the path this panel always
+    honours, so the canvas is REPAINTED: ~1024 writes at roughly 30 ms each
+    (~30 s). The image upload still goes FIRST, because that is what the panel
+    stores and redisplays on its own power-up; the repaint is what guarantees
+    the picture is actually on the wall now.
+
+    GIF playback is re-sent through the GIF flow, which is proven reliable —
+    before this, a drop during a loop restored the canvas instead of the GIF.
+    """
+    if _painter_busy() or spiral_state["running"]:
+        return                              # paint_runner resumes on its own pixel
+    if state["display_mode"] in SELF_DRIVING:
+        return
+
+    playing = state.get("now_playing") or {}
+    if playing.get("kind") == "gif" and playing.get("path") and Path(playing["path"]).exists():
+        try:
+            async with dev_lock:
+                await send_gif_flow_controlled(Path(playing["path"]).read_bytes())
+            log.info("reconnect: re-sent gif %s", playing.get("name"))
+        except Exception as e:
+            log.warning("reconnect: gif restore failed: %s", e)
+        return
+
+    try:
+        async with dev_lock:
+            await push_canvas_locked()
+    except Exception as e:
+        log.warning("reconnect: canvas upload failed (%s) — repainting anyway", e)
+
+    steps = [(x, y, canvas.img.getpixel((x, y))) for x, y in spiral_coords(canvas.size)]
+    log.info("reconnect: repainting canvas via graffiti (%d pixels)", len(steps))
+    spiral_state["task"] = asyncio.create_task(_repaint_canvas(steps))
+
+
+async def _repaint_canvas(steps):
+    await paint_runner(steps, delay=0.0, clear=False, label="restore")
+    # paint_runner leaves the mode as "graffiti"; hand it back so the NEXT
+    # reconnect still recognises this as a restorable still
+    state["display_mode"] = "canvas"
+    state["needs_push"] = False
+
+
 async def on_connected():
     state["connected_since"] = time.time()
     state["last_error"] = None
@@ -189,8 +246,8 @@ async def on_connected():
             await IdmCommon().setTime(now.year, now.month, now.day, now.hour, now.minute, now.second)
         except Exception as e:
             log.warning("setTime failed (non-fatal): %s", e)
-        await push_canvas_locked()
-    log.info("connected to %s, canvas pushed", cm.address)
+    log.info("connected to %s", cm.address)
+    asyncio.create_task(restore_display())      # outside dev_lock: it repaints
 
 
 async def connection_loop():
@@ -225,9 +282,12 @@ async def lifespan(app: FastAPI):
     # (and therefore what the panel stores and redisplays on power-up) until a
     # scene, game, or gallery send replaces it.
     if all(p == (0, 0, 0) for p in canvas.img.getdata()):
-        logo = ROOT / "art" / "daylabs-mark-32.png"
+        # prefer the last picture that was on the wall, so restarting the daemon
+        # does not throw away the day's art; the mark is the fallback
+        last = TMP / "canvas.png"
+        boot = last if last.exists() else ROOT / "art" / "daylabs-mark-32.png"
         try:
-            canvas.apply_ops([{"op": "image", "path": str(logo)}])
+            canvas.apply_ops([{"op": "image", "path": str(boot)}])
         except Exception as e:
             log.warning("boot logo failed (%s) — using text splash", e)
             canvas.apply_ops([
