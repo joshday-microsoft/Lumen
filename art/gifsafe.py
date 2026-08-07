@@ -69,13 +69,27 @@ def _blocks(data: bytes) -> bytes:
     return bytes(out)
 
 
-def save(frames, path, duration_ms=140, colors=48):
-    """Encode RGB frames as a maximally-conservative animated GIF."""
+def save(frames, path, duration_ms=140, colors=48, keep=()):
+    """Encode RGB frames as a maximally-conservative animated GIF.
+
+    keep: colours that MUST survive quantisation. Median cut allocates by
+    pixel count, so a colour covering well under a percent of the montage
+    gets no entry at all and snaps to whatever is nearest — a 20-pixel ruby
+    flash on three frames of a green bird came back mapped to the violet of a
+    flower elsewhere in the frame. Colours passed here are pasted into a
+    palette-only swatch frame (never into the output) so they earn one.
+    """
     w, h = frames[0].size
     # one shared palette built from every frame's content
-    montage = Image.new("RGB", (w * len(frames), h))
-    for i, f in enumerate(frames):
-        montage.paste(f.convert("RGB"), (i * w, 0))
+    pal_src = [f.convert("RGB") for f in frames]
+    if keep:
+        swatch = Image.new("RGB", (w, h))
+        for i in range(w * h):
+            swatch.putpixel((i % w, i // w), tuple(keep[i * len(keep) // (w * h)]))
+        pal_src = pal_src + [swatch]
+    montage = Image.new("RGB", (w * len(pal_src), h))
+    for i, f in enumerate(pal_src):
+        montage.paste(f, (i * w, 0))
     pal_img = montage.quantize(colors=colors, dither=Image.Dither.NONE)
     quantized = [f.convert("RGB").quantize(palette=pal_img, dither=Image.Dither.NONE) for f in frames]
 
