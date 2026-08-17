@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import {
   removePiece,
   send,
-  sendImage,
+  sendFast,
   sendText,
   setBrightness,
   setScreen,
@@ -163,10 +163,10 @@ export default function App() {
                 <button
                   className="btn ghost"
                   disabled={busy || !status?.connected}
-                  title="Instant, but this panel's image path is unreliable — if the wall goes blank, paint it instead"
-                  onClick={() => act(`pushed ${selected.name}`, () => sendImage(selected))}
+                  title="Same painting path, no delay between strokes — the picture without the performance"
+                  onClick={() => act(`painted ${selected.name} fast`, () => sendFast(selected))}
                 >
-                  Send image (instant)
+                  Paint fast (skip the reveal)
                 </button>
               )}
               {selected.companion && (

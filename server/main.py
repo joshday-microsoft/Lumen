@@ -60,6 +60,12 @@ DEFAULT_SCROLL_FONT = r"C:\Windows\Fonts\arialbd.ttf"
 MAX_GIF_FRAMES = 60
 MAX_GIF_BYTES = 8192
 
+# Measured cost of one acked Graffiti pixel write on this panel+adapter (1024 px
+# at delay=0 took 12.8 s, 2026-08-17). The paint estimate used to floor the whole
+# per-pixel cost at 30 ms, so it quoted 30 s for a 13 s job: the inter-stroke
+# delay is ON TOP of the write, not an alternative to it.
+GRAFFITI_WRITE_S = 0.0125
+
 
 def load_config() -> dict:
     if CONFIG_PATH.exists():
@@ -681,7 +687,7 @@ async def paint_runner(steps, delay: float, clear: bool, label: str):
     Survives BLE drops (waits and resumes on the same pixel)."""
     total = len(steps)
     spiral_state.update(running=True, total=total, delay=delay, index=0)
-    log.info("%s: painting %d pixels, %.3fs delay (~%.1f min)", label, total, delay, total * max(delay, 0.03) / 60)
+    log.info("%s: painting %d pixels, %.3fs delay (~%.1f min)", label, total, delay, total * (delay + GRAFFITI_WRITE_S) / 60)
     try:
         if clear:
             canvas.apply_ops([{"op": "clear"}])   # clean slate on panel + mirror
@@ -1175,7 +1181,7 @@ async def paint(body: dict = Body(...)):
         paint_runner(steps, delay, clear=bool(body.get("clear", True)), label="paint")
     )
     return {"started": True, "pixels": len(steps), "delay": delay,
-            "eta_s": round(len(steps) * max(delay, 0.03), 1)}
+            "eta_s": round(len(steps) * (delay + GRAFFITI_WRITE_S), 1)}
 
 
 @app.post("/paint/stop")

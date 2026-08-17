@@ -126,16 +126,21 @@ export async function send(piece: Piece): Promise<void> {
 }
 
 /**
- * Push a still as a single image upload instead of painting it stroke by
- * stroke. Instant rather than ~30s — but this is the panel's DIY image path,
- * which this unit has failed on repeatedly (2026-07-15 and 2026-08-05): every
- * write acks and nothing renders. Kept because it is genuinely the fast way
- * and it does work on a good day; the UI labels it as the unreliable one so a
- * blank wall reads as "that path again" rather than a mystery.
+ * A still, as fast as the panel will take it — same graffiti path as send(),
+ * with the inter-stroke delay dropped so it is BLE-bound (~13s) instead of a
+ * ~30s performance. Use when you want the picture up, not the reveal.
+ *
+ * This replaces a "Send image (instant)" button that posted to /image. That is
+ * the single-upload path and it really would be instant, but it does not
+ * render on this unit — confirmed again on the wall 2026-08-17: a painting
+ * sent that way came up black. It was a mistake to ship a control for a
+ * transport already documented as non-functional here; "labelled unreliable"
+ * is not a substitute for "works". The fastest path that actually renders is
+ * still graffiti, so that is what the fast button does.
  */
-export async function sendImage(piece: Piece): Promise<void> {
+export async function sendFast(piece: Piece): Promise<void> {
   await clearWall();
-  await takeover(() => req("POST", "/image", { path: piece.file }, 60000));
+  await takeover(() => req("POST", "/paint", { path: piece.file, delay: 0 }, 90000));
 }
 
 /** Move a piece to art/.trash (recoverable), then the caller reloads. */
