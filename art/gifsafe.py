@@ -8,6 +8,7 @@ color table, no transparency, no interlace, disposal=1, own LZW.
 save(frames, path, duration_ms, colors=48) -> byte size (round-trip verified)
 """
 
+import warnings
 from pathlib import Path
 
 from PIL import Image
@@ -69,6 +70,21 @@ def _blocks(data: bytes) -> bytes:
     return bytes(out)
 
 
+#: The panel renders a global colour table of 64 or smaller. At 128 (LZW
+#: minimum code size 7) it still plays — frame timing and shapes survive — but
+#: the colours come out scrambled, which is the cruellest way for this to fail:
+#: it looks like a decoder that is working, so it reads as an art problem.
+#: Confirmed on the wall 2026-08-17 by Josh: tabby (64) renders, eclipse (128)
+#: renders as "a big circle that's all kinds of colors that's spasming out";
+#: re-encoding the identical frames at 64 fixed it outright.
+#:
+#: This is enforced HERE rather than in each art script because every script
+#: sweeps its own palette sizes looking for the best quantisation error under
+#: the byte budget, and a per-script tuple is a rule four scripts already got
+#: wrong. A hardware limit belongs at the one place that talks to the hardware.
+MAX_COLORS = 64
+
+
 def save(frames, path, duration_ms=140, colors=48, keep=()):
     """Encode RGB frames as a maximally-conservative animated GIF.
 
@@ -78,7 +94,18 @@ def save(frames, path, duration_ms=140, colors=48, keep=()):
     flash on three frames of a green bird came back mapped to the violet of a
     flower elsewhere in the frame. Colours passed here are pasted into a
     palette-only swatch frame (never into the output) so they earn one.
+
+    colors is CLAMPED to MAX_COLORS. Callers may ask for more (the palette
+    sweeps in the art scripts do); they get 64 and a warning, because a bigger
+    table encodes a file the panel cannot colour correctly.
     """
+    if colors > MAX_COLORS:
+        warnings.warn(
+            f"gifsafe: {colors} colours requested, clamped to {MAX_COLORS} — "
+            f"the panel scrambles any global colour table larger than that",
+            stacklevel=2,
+        )
+        colors = MAX_COLORS
     w, h = frames[0].size
     # one shared palette built from every frame's content
     pal_src = [f.convert("RGB") for f in frames]
