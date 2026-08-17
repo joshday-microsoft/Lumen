@@ -1,53 +1,48 @@
 # Lumen Gallery
 
-A small Windows desktop app to browse the art in [`../../art/`](../../art) and
-send any piece straight to the LED wall.
+React + TypeScript UI for the LED wall. Built by Vite straight into
+`server/static/app/`, served by the daemon at <http://127.0.0.1:7788/app>, and
+wrapped by the Electron shell in `app/desktop` — so `npm run build` is the whole
+deploy.
 
-![icon](icon-preview.png)
-
-- **Live grid** of every still (`.png`) and loop (`.gif`) in `art/`, newest
-  first — new daily pieces appear on relaunch. Reads the folder directly.
-- **On the wall now** — mirrors the panel's current canvas, updated live.
-- **Click** a piece to select, **Send to Wall** (or double-click) pushes it:
-  stills via `POST /image`, GIF loops via `POST /gif`.
-- **Play a show** — start the self-playing games (Pac-Man / Snake / Galaga)
-  or Conway's Life on the wall; **Stop show** halts it and returns the wall to
-  the Day Labs logo default.
-- Connection status, brightness slider, screen on/off — all talk to the
-  Lumen daemon at `http://127.0.0.1:7788`.
-
-The Day Labs mark (`art/daylabs-mark-32.png`) is the daemon's default boot
-image — what the panel shows on power-up until a scene, game, or send replaces
-it.
-
-Pure Python stdlib + Tkinter + Pillow (in the repo's `.venv`); ships as a
-standalone Windows `.exe` via PyInstaller.
-
-## Build (produces the .exe)
-
-```powershell
-powershell -File app\gallery\build.ps1
+```bash
+npm install
+npm run build     # -> server/static/app, picked up by /app immediately
+npm run dev       # hot reload on :5173, API proxied to the daemon on :7788
 ```
 
-Installs PyInstaller if needed and builds `dist\Lumen Gallery.exe` (one file,
-windowed, icon embedded). Re-run after changing the source. The exe reads the
-live `art/` folder — it is not bundled — so new daily pieces still appear.
+## How the library is organised
 
-## Desktop shortcut
+`GET /library` is the catalog, and `art/DAILY.md` is its source of truth. The
+ledger already records every real piece with its date, medium and description,
+so the gallery no longer globs the art directory and guesses with filename
+substrings — that heuristic is what listed `eclipse-big` (a 10x preview render)
+as browsable art, and showed `eclipse` twice, once as a LOOP and once as a
+STILL.
 
-```powershell
-powershell -File app\gallery\install-shortcut.ps1
+- **pieces** — one entry per ledger row. A loop's `<name>.png` is attached as a
+  `companion` (its hero frame), not listed as a second piece.
+- **unlisted** — on disk but not in the ledger. Reachable under "Extras" so
+  nothing silently disappears.
+- **shows** — the daemon's self-driving modes (games, Life, spiral).
+
+## The one rule worth keeping
+
+**A piece's medium is not its transport.** The ledger calls something a "still"
+or a "painting"; that says nothing about how it has to reach the panel. This
+unit does not honour the PNG upload path (`/image`) — every write acks and
+nothing renders — so stills go by `/paint` (per-pixel graffiti) and loops go by
+`/gif`. The server decides that per piece (`transport`) and `api.ts#send()` is
+the only way anything reaches the wall.
+
+Both previous UIs made that decision at the button instead:
+
+```js
+endpoint = medium === "loop" ? "/gif" : "/image"   // tkinter app AND app.html
 ```
 
-Creates **Lumen Gallery** on the Desktop pointing at the built exe (falls back
-to a windowless `pythonw` launch if the exe isn't built yet). Re-run
-`make_icon.py` to regenerate `icon.ico`.
+...so every still sent from either one silently did nothing.
 
-## Run without building
-
-```powershell
-.venv\Scripts\pythonw.exe app\gallery\lumen_gallery.pyw
-```
-
-The daemon must be running (it auto-starts at logon; otherwise
-`powershell .\start-lumen.ps1`).
+GIF palettes are capped at 64 colours (`art/gifsafe.py`). Above that the panel
+plays the file but scrambles the colours, so the gallery shows a piece's palette
+size and flags anything oversized.

@@ -17,6 +17,7 @@ from pathlib import Path
 from bleak import BleakScanner
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from idotmatrix import (
     Clock as IdmClock,
     Common as IdmCommon,
@@ -1216,9 +1217,128 @@ async def art_file(filename: str):
     return FileResponse(p)
 
 
+# ---------- the library: one curated catalog, from the ledger ----------
+#
+# art/DAILY.md is already a hand-curated list of every real piece, with its date,
+# its medium and a description. The gallery used to ignore all of that and glob
+# the directory, filtering with substring guesses ("strip", "preview", "-1x"),
+# which is why eclipse-big and skein-big showed up as browsable "stills" next to
+# the real pieces: a -big file is a 10x preview render, not art to send.
+#
+# So the ledger is the source of truth for what a piece IS, and the directory is
+# consulted only for what is actually on disk. Anything on disk the ledger does
+# not name is still reachable, grouped as "unlisted", so nothing silently
+# disappears — but it does not clutter the gallery.
+
+DAILY_MD = ART_DIR / "DAILY.md"
+
+SHOWS = [
+    {"id": "pacman", "name": "Pac-Man", "endpoint": "/pacman",
+     "blurb": "arcade-faithful maze, real ghost AI"},
+    {"id": "snake", "name": "Snake", "endpoint": "/snake", "blurb": "plays itself"},
+    {"id": "galaga", "name": "Galaga", "endpoint": "/galaga", "blurb": "formation attack waves"},
+    {"id": "life", "name": "Life", "endpoint": "/life",
+     "blurb": "Conway, age-coloured, self-reseeding"},
+    {"id": "spiral", "name": "Spectrum spiral", "endpoint": "/spiral",
+     "blurb": "1,024 LEDs coiled inward"},
+]
+
+# Renders and scratch output that live in art/ but are not sendable pieces.
+NOT_ART = ("strip", "preview", "frametest", "-1x", "-big", "icon", "mark-", "encoded")
+
+
+def _gif_palette(p: Path) -> int | None:
+    """Global colour table size, so the UI can show it (see gifsafe.MAX_COLORS)."""
+    try:
+        b = p.read_bytes()[:11]
+        return 2 ** ((b[10] & 7) + 1) if len(b) >= 11 and b[10] & 0x80 else None
+    except Exception:
+        return None
+
+
+def _ledger_rows():
+    """(date, name, medium, description) for every row of the daily ledger."""
+    rows = []
+    if not DAILY_MD.exists():
+        return rows
+    for line in DAILY_MD.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("| 20"):
+            continue
+        cells = line.strip().strip("|").split("|", 3)
+        if len(cells) < 4:
+            continue
+        rows.append(tuple(c.strip() for c in cells))
+    return rows
+
+
+def _piece(name, file: Path, medium, date="", description=""):
+    st = file.stat()
+    is_gif = file.suffix.lower() == ".gif"
+    return {
+        "id": file.stem,
+        "name": name,
+        "file": file.name,
+        # what it IS in the ledger (loop / still / painting / simulation) vs how
+        # it has to be DELIVERED — the two are not the same thing, and conflating
+        # them is what sent every still down the broken /image path
+        "medium": medium,
+        "kind": "loop" if is_gif else "still",
+        "transport": "gif" if is_gif else "paint",
+        "date": date,
+        "description": description,
+        "bytes": st.st_size,
+        "mtime": st.st_mtime,
+        "palette": _gif_palette(file) if is_gif else None,
+    }
+
+
+@app.get("/library")
+async def library():
+    pieces, claimed = [], set()
+    for date, name, medium, desc in _ledger_rows():
+        for ext in (".gif", ".png"):
+            f = ART_DIR / f"{name}{ext}"
+            if f.exists():
+                p = _piece(name, f, medium, date, desc)
+                # A loop's <name>.png is its hero FRAME, not a second artwork.
+                # Listing both is what put "eclipse LOOP" and "eclipse STILL"
+                # side by side in the old grid looking like two pieces. It is
+                # still sendable — as a companion of the one piece it belongs to.
+                still = ART_DIR / f"{name}.png"
+                if ext == ".gif" and still.exists():
+                    p["companion"] = _piece(name, still, "still frame", date, "")
+                    claimed.add(still.name)
+                pieces.append(p)
+                claimed.add(f.name)
+                break
+    pieces.sort(key=lambda p: (p["date"], p["mtime"]), reverse=True)
+
+    unlisted = []
+    if ART_DIR.exists():
+        for f in sorted(list(ART_DIR.glob("*.png")) + list(ART_DIR.glob("*.gif"))):
+            if f.name in claimed or any(s in f.stem.lower() for s in NOT_ART):
+                continue
+            unlisted.append(_piece(f.stem, f, "unlisted"))
+        unlisted.sort(key=lambda p: p["mtime"], reverse=True)
+
+    return {"pieces": pieces, "unlisted": unlisted, "shows": SHOWS,
+            "max_palette": 64}
+
+
+_STATIC = ROOT / "server" / "static" / "app"
+if _STATIC.exists():
+    app.mount("/assets", StaticFiles(directory=_STATIC / "assets"), name="assets")
+
+
 @app.get("/app", response_class=HTMLResponse)
 async def gallery_app():
+    """The React gallery (built to server/static/app), with the hand-written
+    app.html kept as a fallback so the desktop shell still has a UI if the
+    bundle has not been built on this machine."""
+    built = ROOT / "server" / "static" / "app" / "index.html"
+    if built.exists():
+        return built.read_text(encoding="utf-8")
     page = ROOT / "server" / "app.html"
     if not page.exists():
-        raise HTTPException(404, "app.html missing")
+        raise HTTPException(404, "no gallery UI built (run: cd app/gallery && npm run build)")
     return page.read_text(encoding="utf-8")

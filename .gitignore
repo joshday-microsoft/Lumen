@@ -8,4 +8,7 @@ art/frametest-*.gif
 app/gallery/dist/
 app/gallery/build/
 app/gallery/*.spec
-app/desktop/node_modules/
+node_modules/
+app/gallery/dist/
+
+app/gallery/tsconfig.tsbuildinfo
