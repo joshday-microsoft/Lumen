@@ -125,6 +125,23 @@ export async function send(piece: Piece): Promise<void> {
   );
 }
 
+/**
+ * Push a still as a single image upload instead of painting it stroke by
+ * stroke. Instant rather than ~30s — but this is the panel's DIY image path,
+ * which this unit has failed on repeatedly (2026-07-15 and 2026-08-05): every
+ * write acks and nothing renders. Kept because it is genuinely the fast way
+ * and it does work on a good day; the UI labels it as the unreliable one so a
+ * blank wall reads as "that path again" rather than a mystery.
+ */
+export async function sendImage(piece: Piece): Promise<void> {
+  await clearWall();
+  await takeover(() => req("POST", "/image", { path: piece.file }, 60000));
+}
+
+/** Move a piece to art/.trash (recoverable), then the caller reloads. */
+export const removePiece = (piece: Piece) =>
+  req<{ moved_to: string }>("DELETE", `/library/${encodeURIComponent(piece.file)}`);
+
 export async function startShow(show: Show): Promise<void> {
   await clearWall();
   await takeover(() => req("POST", show.endpoint, {}));

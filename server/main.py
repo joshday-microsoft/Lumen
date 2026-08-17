@@ -431,17 +431,47 @@ async def image(body: dict = Body(...)):
     return {"pushed": pushed}
 
 
-async def send_gif_flow_controlled(gif_bytes: bytes):
-    """Send a GIF with per-block flow control. The device acks each 4k block
-    with a notification (05 00 01 00 01 ...); the library fires blocks
-    blind, which drops everything past the first block on this panel and
-    truncates animations. Caller must hold dev_lock."""
+# The panel's block acks, and what they mean. The last two bytes are the state:
+#   ...00 01  "send more"  — expected for every block EXCEPT the last
+#   ...00 03  "complete"   — expected only for the last block
+ACK_CONTINUE = 0x01
+ACK_COMPLETE = 0x03
+
+
+def _build_reset_gif() -> bytes:
+    """A tiny two-frame near-black GIF, used only to break the panel out of its
+    "I already have this one" short-circuit. One block, so it always lands."""
+    import sys
+    sys.path.insert(0, str(ROOT / "art"))
+    import gifsafe
+    frames = [PilImage.new("RGB", (canvas.size, canvas.size), (0, 0, 0)),
+              PilImage.new("RGB", (canvas.size, canvas.size), (1, 1, 1))]
+    tmp = TMP / "reset.gif"
+    gifsafe.save(frames, tmp, duration_ms=40, colors=2)
+    return tmp.read_bytes()
+
+
+_RESET_GIF = _build_reset_gif()
+
+
+async def _gif_upload_once(gif_bytes: bytes) -> str | None:
+    """One attempt. Returns None on success, or why it failed.
+
+    Reads what the ack SAYS instead of only that one arrived. A premature
+    "complete" on a non-final block means the panel has finalised early: it
+    keeps only the blocks it took, the rest is discarded, and the animation on
+    the wall is truncated at whatever frame the delivered bytes ran out —
+    while every write still acks and the upload still looks like a success.
+    """
     chunks = IdmGif()._createPayloads(bytearray(gif_bytes))
     client = cm.client
     ack = asyncio.Event()
+    last: dict[str, int | None] = {"state": None}
 
     def on_notify(_char, payload: bytearray):
-        log.info("gif ack notification: %s", bytes(payload[:8]).hex())
+        raw = bytes(payload[:8])
+        log.info("gif ack notification: %s", raw.hex())
+        last["state"] = raw[4] if len(raw) >= 5 else None
         ack.set()
 
     notify_ok = True
@@ -454,24 +484,70 @@ async def send_gif_flow_controlled(gif_bytes: bytes):
         char = client.services.get_characteristic(UUID_WRITE_DATA)
         mtu = char.max_write_without_response_size
         for ci, chunk in enumerate(chunks):
+            final = ci == len(chunks) - 1
             ack.clear()
+            last["state"] = None
             for i in range(0, len(chunk), mtu):
                 await client.write_gatt_char(UUID_WRITE_DATA, chunk[i:i + mtu], response=True)
-            if notify_ok:
-                try:
-                    await asyncio.wait_for(ack.wait(), timeout=2.5)
-                except asyncio.TimeoutError:
-                    log.warning("no ack for gif block %d/%d — pausing instead", ci + 1, len(chunks))
-                    await asyncio.sleep(0.5)
-            else:
+            if not notify_ok:
                 await asyncio.sleep(0.5)
-        log.info("gif upload done: %d bytes in %d blocks", len(gif_bytes), len(chunks))
+                continue
+            try:
+                await asyncio.wait_for(ack.wait(), timeout=2.5)
+            except asyncio.TimeoutError:
+                log.warning("no ack for gif block %d/%d — pausing instead", ci + 1, len(chunks))
+                await asyncio.sleep(0.5)
+                continue
+            state = last["state"]
+            if not final and state == ACK_COMPLETE:
+                return (f"panel finalised after block {ci + 1} of {len(chunks)} — "
+                        f"the remaining {len(chunks) - ci - 1} block(s) would be discarded "
+                        f"and the loop would play truncated")
+            if final and state not in (ACK_COMPLETE, None):
+                return f"final block acked {state!r}, expected complete"
+        return None
     finally:
         if notify_ok:
             try:
                 await client.stop_notify(UUID_READ_DATA)
             except Exception:
                 pass
+
+
+async def send_gif_flow_controlled(gif_bytes: bytes, tries: int = 3):
+    """Send a GIF with per-block flow control, verifying the handshake.
+
+    The library fires blocks blind, which drops everything past the first block
+    on this panel. Flow control fixed that; this adds the other half — checking
+    that the panel agreed to keep receiving. Observed 2026-08-17: the panel
+    began answering "complete" to block 1 of a 2-block eclipse, so it kept only
+    frames 0-9 of 16 and the loop froze at totality on every repeat, while the
+    daemon logged a clean "gif upload done". Re-subscribing and re-sending
+    clears it; giving up raises rather than reporting a success that isn't one.
+    """
+    for attempt in range(1, tries + 1):
+        why = await _gif_upload_once(gif_bytes)
+        if why is None:
+            log.info("gif upload done: %d bytes in %d blocks%s", len(gif_bytes),
+                     len(IdmGif()._createPayloads(bytearray(gif_bytes))),
+                     "" if attempt == 1 else f" (attempt {attempt})")
+            return
+        log.warning("gif upload attempt %d/%d rejected: %s", attempt, tries, why)
+        if attempt < tries:
+            # Plain retries do NOT clear this — measured 2026-08-17, three in a
+            # row all finalised after block 1. What clears it is uploading a
+            # DIFFERENT GIF: the panel short-circuits a GIF it believes it
+            # already holds, acking "complete" without taking the rest. A
+            # non-GIF mode change (/color) does not clear it; only another GIF
+            # does. So the recovery is to park one frame of nothing on the
+            # panel and immediately re-send the real one.
+            try:
+                await _gif_upload_once(_RESET_GIF)
+                log.info("sent reset gif to clear the panel's short-circuit")
+            except Exception as e:
+                log.warning("reset gif failed: %s", e)
+            await asyncio.sleep(0.5)
+    raise HTTPException(502, f"panel would not accept the whole GIF: {why}")
 
 
 @app.post("/gif")
@@ -1328,6 +1404,39 @@ async def library():
 _STATIC = ROOT / "server" / "static" / "app"
 if _STATIC.exists():
     app.mount("/assets", StaticFiles(directory=_STATIC / "assets"), name="assets")
+
+
+ART_TRASH = ART_DIR / ".trash"
+
+
+@app.delete("/library/{filename}")
+async def library_delete(filename: str):
+    """Remove a piece from the gallery.
+
+    It is a MOVE to art/.trash, not an unlink. These are one-of-a-kind pieces
+    with no other copy on disk, the button is one click next to "send", and a
+    mis-click should cost a file move rather than the artwork. The generator
+    script stays put — the .py is how the piece could be rebuilt — and the
+    DAILY.md row stays too, because the ledger is the history of what was made,
+    not a list of what is currently on disk. A piece whose file is gone simply
+    stops appearing in /library.
+    """
+    p = (ART_DIR / filename).resolve()
+    if p.parent != ART_DIR.resolve():
+        raise HTTPException(400, "outside the art directory")
+    if p.suffix.lower() not in (".png", ".gif"):
+        raise HTTPException(400, "only .png and .gif pieces can be removed")
+    if not p.exists():
+        raise HTTPException(404, "no such piece")
+    ART_TRASH.mkdir(exist_ok=True)
+    dest = ART_TRASH / p.name
+    n = 1
+    while dest.exists():
+        dest = ART_TRASH / f"{p.stem}.{n}{p.suffix}"
+        n += 1
+    p.rename(dest)
+    log.info("library: moved %s to %s", p.name, dest)
+    return {"ok": True, "moved_to": str(dest.relative_to(ROOT))}
 
 
 @app.get("/app", response_class=HTMLResponse)

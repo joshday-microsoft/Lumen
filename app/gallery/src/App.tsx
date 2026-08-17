@@ -1,6 +1,8 @@
 import { useMemo, useState, useEffect } from "react";
 import {
+  removePiece,
   send,
+  sendImage,
   sendText,
   setBrightness,
   setScreen,
@@ -73,8 +75,9 @@ export default function App() {
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(true);
-    await run(label, fn);
+    const ok = await run(label, fn);
     setBusy(false);
+    return ok;
   };
 
   return (
@@ -156,6 +159,16 @@ export default function App() {
               >
                 {selected.kind === "loop" ? "Play on the wall" : "Paint on the wall"}
               </button>
+              {selected.kind === "still" && (
+                <button
+                  className="btn ghost"
+                  disabled={busy || !status?.connected}
+                  title="Instant, but this panel's image path is unreliable — if the wall goes blank, paint it instead"
+                  onClick={() => act(`pushed ${selected.name}`, () => sendImage(selected))}
+                >
+                  Send image (instant)
+                </button>
+              )}
               {selected.companion && (
                 <button
                   className="btn ghost"
@@ -167,6 +180,21 @@ export default function App() {
                   Paint its still frame
                 </button>
               )}
+              <button
+                className="btn danger sm-inline"
+                disabled={busy}
+                onClick={async () => {
+                  if (!confirm(`Move "${selected.name}" to art/.trash?\n\nThe generator script and its ledger row stay — only the image is removed.`))
+                    return;
+                  const ok = await act(`removed ${selected.name}`, () => removePiece(selected));
+                  if (ok) {
+                    setSelected(null);
+                    reload();
+                  }
+                }}
+              >
+                Delete
+              </button>
             </div>
           ) : (
             <div className="sel-box muted">Pick a piece from the gallery.</div>

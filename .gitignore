@@ -12,3 +12,4 @@ node_modules/
 app/gallery/dist/
 
 app/gallery/tsconfig.tsbuildinfo
+art/.trash/
